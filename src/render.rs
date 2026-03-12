@@ -788,10 +788,10 @@ impl MockEgl {
     pub fn draw_avatar(&self, _px: f32, _py: f32, _size: f32, _surf_w: f32, _surf_h: f32, _tex: glow::NativeTexture, _opacity: f32, _desaturate: f32) {}
     pub fn swap(&self) {}
     pub fn delete_texture(&self, _tex: glow::NativeTexture) {}
-    pub fn upload_texture_wh(&self, _pixels: &[u8], _w: u32, _h: u32) -> glow::NativeTexture { unsafe { std::mem::zeroed() } }
-    pub fn tex_mic(&self) -> glow::NativeTexture { unsafe { std::mem::zeroed() } }
-    pub fn tex_headphone(&self) -> glow::NativeTexture { unsafe { std::mem::zeroed() } }
-    pub fn tex_strikeout(&self) -> glow::NativeTexture { unsafe { std::mem::zeroed() } }
+    pub fn upload_texture_wh(&self, _pixels: &[u8], _w: u32, _h: u32) -> glow::NativeTexture { std::num::NonZeroU32::new(1).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
+    pub fn tex_mic(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(2).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
+    pub fn tex_headphone(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(3).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
+    pub fn tex_strikeout(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(4).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
 }
 
 
