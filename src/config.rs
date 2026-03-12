@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tracing::{info, warn, error};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(default)]
@@ -51,16 +52,16 @@ impl Config {
         let mut cfg: Config = match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str(&text) {
                 Ok(c) => {
-                    eprintln!("[config] loaded from {path:?}");
+                    info!("loaded from {path:?}");
                     c
                 }
                 Err(e) => {
-                    eprintln!("[config] parse error in {path:?}: {e}, using defaults");
+                    warn!("parse error in {path:?}: {e}, using defaults");
                     Self::default()
                 }
             },
             Err(_) => {
-                eprintln!("[config] no config file found at {path:?}, using defaults");
+                info!("no config file found at {path:?}, using defaults");
                 Self::default()
             }
         };
@@ -110,9 +111,9 @@ font_size = 14.0
 compact_by_default = false
 "#;
         if let Err(e) = std::fs::write(&path, content) {
-            eprintln!("[config] could not write default config: {e}");
+            error!("could not write default config: {e}");
         } else {
-            eprintln!("[config] wrote default config to {path:?}");
+            info!("wrote default config to {path:?}");
         }
     }
 }

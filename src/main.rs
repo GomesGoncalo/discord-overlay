@@ -29,10 +29,20 @@ use render::{EglContext, load_system_font};
 use state::App;
 use config::Config;
 use glow::HasContext;
+use tracing::{debug, info, warn};
 
 fn main() {
-    env_logger::init();
-    println!("Starting hypr-overlay-wl (EGL/GLES2)");
+    use tracing_subscriber::{EnvFilter, fmt};
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_env("RUST_LOG")
+                .unwrap_or_else(|_| EnvFilter::new("hypr_overlay_wl=info"))
+        )
+        .with_target(false)
+        .with_thread_ids(false)
+        .compact()
+        .init();
+    info!("Starting hypr-overlay-wl (EGL/GLES2)");
 
     let cfg = Config::load();
     Config::write_default_if_missing();
@@ -104,7 +114,7 @@ fn main() {
                 for uid in &to_remove {
                     if let Some(pos) = app.participants.iter().position(|p| &p.user_id == uid) {
                         let name = app.participants[pos].display_name.clone();
-                        eprintln!("[overlay] {name} removed from list");
+                        debug!("{name} removed from list");
                         app.participants.remove(pos);
                         if let Some((tex, _, _)) = app.name_textures.remove(uid) {
                             unsafe {
@@ -214,10 +224,10 @@ fn main() {
             discord_ev_tx,
             rx,
         );
-        println!("Discord IPC enabled — waiting for connection...");
+        info!("Discord IPC enabled — waiting for connection...");
         Some(tx)
     } else {
-        println!(
+        info!(
             "Discord IPC disabled — set discord_client_id and discord_client_secret in\n  ~/.config/hypr-overlay/config.toml"
         );
         None
@@ -279,11 +289,11 @@ fn main() {
         std::thread::spawn(move || {
             let mut inotify = match Inotify::init() {
                 Ok(i) => i,
-                Err(e) => { eprintln!("[config] inotify init failed: {e}"); return; }
+                Err(e) => { warn!("inotify init failed: {e}"); return; }
             };
             if let Some(dir) = config_path.parent() {
                 if let Err(e) = inotify.watches().add(dir, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO) {
-                    eprintln!("[config] inotify watch add failed: {e}"); return;
+                    warn!("inotify watch add failed: {e}"); return;
                 }
             }
             let config_filename = config_path.file_name().map(|f| f.to_owned());
@@ -298,7 +308,7 @@ fn main() {
                             let _ = inotify_reload_tx.send(());
                         }
                     }
-                    Err(e) => { eprintln!("[config] inotify read error: {e}"); break; }
+                    Err(e) => { warn!("inotify read error: {e}"); break; }
                 }
             }
         });
@@ -306,7 +316,7 @@ fn main() {
     loop_handle
         .insert_source(inotify_reload_rx, |event, _, app| {
             if let calloop::channel::Event::Msg(()) = event {
-                eprintln!("[config] config file changed, reloading...");
+                info!("config file changed, reloading...");
                 let new_cfg = Config::load();
                 app.opacity = new_cfg.opacity;
                 app.max_visible_rows = new_cfg.max_visible_rows;
@@ -334,5 +344,5 @@ fn main() {
         })
         .expect("event loop error");
 
-    println!("hypr-overlay exiting");
+    info!("hypr-overlay exiting");
 }

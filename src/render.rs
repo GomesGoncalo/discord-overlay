@@ -1,4 +1,5 @@
 use std::ffi::c_void;
+use tracing::info;
 
 use smithay_client_toolkit as sctk;
 use sctk::reexports::client::Connection;
@@ -677,7 +678,7 @@ pub fn load_system_font() -> Option<fontdue::Font> {
             if let Ok(font) =
                 fontdue::Font::from_bytes(data.as_slice(), fontdue::FontSettings::default())
             {
-                eprintln!("Loaded font: {p}");
+                info!("Loaded font: {p}");
                 return Some(font);
             }
         }

@@ -110,6 +110,7 @@ Env vars `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` override the config fil
 | `OVERLAY_OPACITY` | Overrides `opacity` from config |
 | `DISCORD_CLIENT_ID` | Overrides `discord_client_id` from config |
 | `DISCORD_CLIENT_SECRET` | Overrides `discord_client_secret` from config |
+| `RUST_LOG` | `hypr_overlay_wl=info` | Log level filter (e.g. `debug`, `hypr_overlay_wl::discord=trace`) |
 
 ## Controls
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
+use tracing::{debug, info};
 
 use smithay_client_toolkit as sctk;
 use sctk::compositor::{CompositorState, Region};
@@ -112,8 +113,8 @@ impl App {
         if self.height == new_h {
             return;
         }
-        eprintln!(
-            "[overlay] resize {} → {} px tall ({} participant rows)",
+        debug!(
+            "resize {} → {} px tall ({} participant rows)",
             self.height,
             new_h,
             self.participants.len()
@@ -255,7 +256,7 @@ impl App {
     pub fn handle_discord_event(&mut self, event: discord::DiscordEvent) -> bool {
         match event {
             discord::DiscordEvent::Ready { username } => {
-                println!("Discord connected as {username}");
+                info!("Discord connected as {username}");
                 false
             }
             discord::DiscordEvent::VoiceSettings { mute, deaf } => {
@@ -342,8 +343,8 @@ impl App {
                 if self.participants.iter().any(|e| e.user_id == p.user_id) {
                     return false;
                 }
-                eprintln!(
-                    "[overlay] {} joined the channel",
+                info!(
+                    "{} joined the channel",
                     p.nick.as_deref().unwrap_or(&p.username)
                 );
                 let uid = p.user_id.clone();
@@ -372,8 +373,8 @@ impl App {
                     .iter_mut()
                     .find(|p| p.user_id == user_id && !p.leaving)
                 {
-                    eprintln!(
-                        "[overlay] {} leaving channel (animating out)",
+                    info!(
+                        "{} leaving channel (animating out)",
                         p.display_name
                     );
                     p.leaving = true;

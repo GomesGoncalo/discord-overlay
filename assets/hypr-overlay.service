@@ -10,6 +10,7 @@ Restart=on-failure
 RestartSec=3s
 Environment=WAYLAND_DISPLAY=wayland-1
 Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=RUST_LOG=hypr_overlay_wl=debug
 
 [Install]
 WantedBy=graphical-session.target

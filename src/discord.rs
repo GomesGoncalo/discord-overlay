@@ -13,6 +13,7 @@
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
+use tracing::{debug, info, warn, error};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -120,7 +121,7 @@ fn find_socket() -> Option<UnixStream> {
         for i in 0..10 {
             let path = format!("{base}/discord-ipc-{i}");
             if let Ok(s) = UnixStream::connect(&path) {
-                eprintln!("[discord] connected to {path}");
+                info!("connected to {path}");
                 return Some(s);
             }
         }
@@ -243,7 +244,7 @@ fn authenticate(stream: &mut UnixStream, token: &str) -> Result<String, AuthErro
         match read_frame(stream) {
             Ok((OP_FRAME, v)) if v["nonce"] == "auth" || v["cmd"] == "AUTHENTICATE" => {
                 if v["evt"] == "ERROR" {
-                    eprintln!("[discord] AUTHENTICATE error: {}", v["data"]["message"]);
+                    warn!("AUTHENTICATE error: {}", v["data"]["message"]);
                     return Err(AuthError::InvalidToken);
                 }
                 return Ok(token.to_string());
@@ -257,7 +258,7 @@ fn authenticate(stream: &mut UnixStream, token: &str) -> Result<String, AuthErro
 
 /// Full OAuth flow: AUTHORIZE → code → HTTP exchange → AUTHENTICATE.
 fn authorize_flow(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
-    eprintln!("[discord] Starting OAuth — please check Discord for an authorization popup");
+    info!("Starting OAuth — please check Discord for an authorization popup");
     send_cmd(
         stream,
         json!({
@@ -274,13 +275,13 @@ fn authorize_flow(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     let code = loop {
         if std::time::Instant::now() > deadline {
-            eprintln!("[discord] Authorization timed out");
+            warn!("Authorization timed out");
             return None;
         }
         match read_frame(stream) {
             Ok((OP_FRAME, v)) if v["nonce"] == "authorize" || v["cmd"] == "AUTHORIZE" => {
                 if v["evt"] == "ERROR" {
-                    eprintln!("[discord] AUTHORIZE error: {}", v["data"]["message"]);
+                    warn!("AUTHORIZE error: {}", v["data"]["message"]);
                     return None;
                 }
                 if let Some(code) = v["data"]["code"].as_str() {
@@ -290,16 +291,16 @@ fn authorize_flow(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
             Ok(_) => continue,
             Err(e) if is_timeout(&e) => continue,
             Err(e) => {
-                eprintln!("[discord] error during AUTHORIZE: {e}");
+                error!("error during AUTHORIZE: {e}");
                 return None;
             }
         }
     };
 
-    eprintln!("[discord] Got auth code, exchanging for access token...");
+    info!("Got auth code, exchanging for access token...");
     let (at, rt) = exchange_code(cfg, &code)?;
     save_token(&at, &rt);
-    eprintln!("[discord] Token saved to {}", token_path().display());
+    info!("Token saved to {}", token_path().display());
     authenticate(stream, &at).ok()
 }
 
@@ -310,14 +311,14 @@ fn try_auth(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
             Ok(tok) => return Some(tok),
             Err(AuthError::InvalidToken) => {
                 // Token invalid/expired — try the refresh token
-                eprintln!("[discord] Access token invalid/expired, refreshing...");
+                warn!("Access token invalid/expired, refreshing...");
                 if let Some((new_at, new_rt)) = do_refresh(cfg, &rt) {
                     save_token(&new_at, &new_rt);
                     match authenticate(stream, &new_at) {
                         Ok(tok) => return Some(tok),
                         Err(AuthError::InvalidToken) => {
                             // Refresh token also rejected — clear cache and do full OAuth
-                            eprintln!(
+                            warn!(
                                 "[discord] Refresh token invalid, clearing cache and re-authenticating"
                             );
                             let _ = std::fs::remove_file(token_path());
@@ -326,7 +327,7 @@ fn try_auth(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
                     }
                 } else {
                     // HTTP refresh request failed — clear stale cache and do full OAuth
-                    eprintln!("[discord] Token refresh failed, clearing cache");
+                    warn!("Token refresh failed, clearing cache");
                     let _ = std::fs::remove_file(token_path());
                 }
             }
@@ -463,14 +464,14 @@ fn run_client(
 ) {
     let mut backoff_secs = 1u64;
     loop {
-        eprintln!("[discord] connecting...");
+        info!("connecting...");
         match try_connect(&cfg, &tx, &cmd_rx) {
             Ok(()) => {
-                eprintln!("[discord] disconnected cleanly, reconnecting...");
+                info!("disconnected cleanly, reconnecting...");
                 backoff_secs = 1;
             }
             Err(()) => {
-                eprintln!("[discord] connection error, retrying in {backoff_secs}s");
+                warn!("connection error, retrying in {backoff_secs}s");
             }
         }
         // Notify UI so it can reset to the idle/disconnected state.
@@ -490,7 +491,7 @@ fn try_connect(
         match find_socket() {
             Some(s) => break s,
             None => {
-                eprintln!("[discord] Discord not found, retrying in 5s...");
+                info!("Discord not found, retrying in 5s...");
                 std::thread::sleep(Duration::from_secs(5));
             }
         }
@@ -519,11 +520,11 @@ fn try_connect(
         .as_str()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    eprintln!("[discord] handshake OK — user: {local_username} ({local_user_id})");
+    info!("handshake OK — user: {local_username} ({local_user_id})");
 
     // Authenticate
     try_auth(cfg, &mut stream).ok_or(())?;
-    eprintln!("[discord] authenticated");
+    info!("authenticated");
     let _ = tx.send(DiscordEvent::Ready {
         username: local_username.clone(),
     });
@@ -597,7 +598,7 @@ fn try_connect(
                 let cmd = v["cmd"].as_str().unwrap_or("");
                 let evt = v["evt"].as_str().unwrap_or("");
                 let vnonce = v["nonce"].as_str().unwrap_or("");
-                eprintln!("[discord] frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
+                debug!("frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
 
                 // GET_GUILD response
                 if cmd == "GET_GUILD" && vnonce == "get_guild" {
@@ -607,11 +608,11 @@ fn try_connect(
                 }
                 // GET_SELECTED_VOICE_CHANNEL response (match by cmd+nonce)
                 else if cmd == "GET_SELECTED_VOICE_CHANNEL" && vnonce == "gvsc" {
-                    eprintln!("[discord] gvsc data: {}", v["data"]);
+                    debug!("gvsc data: {}", v["data"]);
                     if !v["data"].is_null() {
                         let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
                         if !cid.is_empty() {
-                            eprintln!("[discord] subscribing SPEAKING_START for channel {cid}");
+                            debug!("subscribing SPEAKING_START for channel {cid}");
                             subscribe_for_channel(&mut stream, &cid, &mut nonce);
                         }
                         // Build participant list — self first, then others (skip self if already in voice_states)
@@ -649,7 +650,7 @@ fn try_connect(
                             .as_str()
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string());
-                        eprintln!(
+                        debug!(
                             "[discord] {} participant(s) in channel {:?}",
                             parts.len(),
                             channel_name
@@ -677,7 +678,7 @@ fn try_connect(
                             }
                         }
                     } else {
-                        eprintln!("[discord] not in a voice channel");
+                        debug!("not in a voice channel");
                         let _ = tx.send(DiscordEvent::VoiceParticipants {
                             participants: vec![],
                             channel_name: None,
@@ -685,7 +686,7 @@ fn try_connect(
                     }
                 } else if evt == "VOICE_CHANNEL_SELECT" {
                     let cid = v["data"]["channel_id"].as_str().unwrap_or("");
-                    eprintln!("[discord] VOICE_CHANNEL_SELECT channel_id={cid:?}");
+                    debug!("VOICE_CHANNEL_SELECT channel_id={cid:?}");
                     if !cid.is_empty() {
                         // Subscribe AFTER confirming channel via GET_SELECTED_VOICE_CHANNEL
                         send_cmd(
@@ -705,7 +706,7 @@ fn try_connect(
                     }
                 } else if evt == "SPEAKING_START" {
                     if let Some(uid) = v["data"]["user_id"].as_str() {
-                        eprintln!("[discord] speaking_start user_id={uid}");
+                        debug!("speaking_start user_id={uid}");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
                             user_id: uid.to_string(),
                             speaking: true,
@@ -713,14 +714,14 @@ fn try_connect(
                     }
                 } else if evt == "SPEAKING_END" {
                     if let Some(uid) = v["data"]["user_id"].as_str() {
-                        eprintln!("[discord] speaking_end user_id={uid}");
+                        debug!("speaking_end user_id={uid}");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
                             user_id: uid.to_string(),
                             speaking: false,
                         });
                     }
                 } else if evt == "VOICE_STATE_UPDATE" {
-                    eprintln!("[discord] VOICE_STATE_UPDATE data={}", v["data"]);
+                    debug!("VOICE_STATE_UPDATE data={}", v["data"]);
                     let p = parse_voice_state(&v["data"]);
                     if !p.user_id.is_empty() {
                         let _ = tx.send(DiscordEvent::ParticipantStateUpdate {
@@ -730,7 +731,7 @@ fn try_connect(
                         });
                     }
                 } else if evt == "VOICE_STATE_CREATE" {
-                    eprintln!("[discord] VOICE_STATE_CREATE data={}", v["data"]);
+                    debug!("VOICE_STATE_CREATE data={}", v["data"]);
                     let p = parse_voice_state(&v["data"]);
                     if !p.user_id.is_empty() {
                         if let Some(hash) = &p.avatar_hash {
@@ -739,7 +740,7 @@ fn try_connect(
                         let _ = tx.send(DiscordEvent::UserJoined(p));
                     }
                 } else if evt == "VOICE_STATE_DELETE" {
-                    eprintln!("[discord] VOICE_STATE_DELETE data={}", v["data"]);
+                    debug!("VOICE_STATE_DELETE data={}", v["data"]);
                     if let Some(uid) = v["data"]["user"]["id"].as_str() {
                         let _ = tx.send(DiscordEvent::UserLeft {
                             user_id: uid.to_string(),
@@ -747,14 +748,14 @@ fn try_connect(
                     }
                 } else if evt == "SPEAKING_END" {
                     if let Some(uid) = v["data"]["user_id"].as_str() {
-                        eprintln!("[discord] speaking_end user_id={uid}");
+                        debug!("speaking_end user_id={uid}");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
                             user_id: uid.to_string(),
                             speaking: false,
                         });
                     }
                 } else if evt == "ERROR" {
-                    eprintln!(
+                    debug!(
                         "[discord] ERROR cmd={cmd:?} nonce={vnonce:?} msg={}",
                         v["data"]["message"]
                     );
@@ -765,7 +766,7 @@ fn try_connect(
             Ok(_) => {}
             Err(e) if is_timeout(&e) => {} // normal 50ms timeout
             Err(e) => {
-                eprintln!("[discord] read error: {e}");
+                warn!("read error: {e}");
                 // We were authenticated; treat as a clean disconnect so the
                 // reconnect loop resets the backoff to 1 s.
                 return Ok(());
