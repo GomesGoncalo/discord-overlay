@@ -821,3 +821,56 @@ impl MockEgl {
     pub fn use_main_program(&self) {}
 }
 
+
+// Trait and impls to allow using Box<dyn EglBackend> for production and tests.
+pub trait EglBackend {
+    fn resize(&self, width: i32, height: i32);
+    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32);
+    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32);
+    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32);
+    fn swap(&self);
+    fn delete_texture(&self, tex: glow::NativeTexture);
+    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture;
+    fn tex_mic(&self) -> glow::NativeTexture;
+    fn tex_headphone(&self) -> glow::NativeTexture;
+    fn tex_strikeout(&self) -> glow::NativeTexture;
+    fn viewport(&self, x: i32, y: i32, w: i32, h: i32);
+    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32);
+    fn clear(&self, mask: u32);
+    fn use_main_program(&self);
+}
+
+impl EglBackend for EglContext {
+    fn resize(&self, width: i32, height: i32) { EglContext::resize(self, width, height) }
+    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32) { EglContext::draw_rect(self, px, py, pw, ph, surf_w, surf_h, color, radius) }
+    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32) { EglContext::draw_icon(self, px, py, pw, ph, surf_w, surf_h, tex, opacity) }
+    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32) { EglContext::draw_avatar(self, px, py, size, surf_w, surf_h, tex, opacity, desaturate) }
+    fn swap(&self) { EglContext::swap(self) }
+    fn delete_texture(&self, tex: glow::NativeTexture) { EglContext::delete_texture(self, tex) }
+    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture { EglContext::upload_texture_wh(self, pixels, w, h) }
+    fn tex_mic(&self) -> glow::NativeTexture { EglContext::tex_mic(self) }
+    fn tex_headphone(&self) -> glow::NativeTexture { EglContext::tex_headphone(self) }
+    fn tex_strikeout(&self) -> glow::NativeTexture { EglContext::tex_strikeout(self) }
+    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) { EglContext::viewport(self, x, y, w, h) }
+    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) { EglContext::clear_color(self, r, g, b, a) }
+    fn clear(&self, mask: u32) { EglContext::clear(self, mask) }
+    fn use_main_program(&self) { EglContext::use_main_program(self) }
+}
+
+#[cfg(test)]
+impl EglBackend for MockEgl {
+    fn resize(&self, _width: i32, _height: i32) { self.resize(_width, _height) }
+    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32) { self.draw_rect(px, py, pw, ph, surf_w, surf_h, color, radius) }
+    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32) { self.draw_icon(px, py, pw, ph, surf_w, surf_h, tex, opacity) }
+    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32) { self.draw_avatar(px, py, size, surf_w, surf_h, tex, opacity, desaturate) }
+    fn swap(&self) { self.swap() }
+    fn delete_texture(&self, tex: glow::NativeTexture) { self.delete_texture(tex) }
+    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture { self.upload_texture_wh(pixels, w, h) }
+    fn tex_mic(&self) -> glow::NativeTexture { self.tex_mic() }
+    fn tex_headphone(&self) -> glow::NativeTexture { self.tex_headphone() }
+    fn tex_strikeout(&self) -> glow::NativeTexture { self.tex_strikeout() }
+    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) { self.viewport(x,y,w,h) }
+    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) { self.clear_color(r,g,b,a) }
+    fn clear(&self, mask: u32) { self.clear(mask) }
+    fn use_main_program(&self) { self.use_main_program() }
+}
