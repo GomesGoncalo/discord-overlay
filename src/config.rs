@@ -77,13 +77,27 @@ impl Config {
 
     /// Write a default config file if none exists.
     pub fn write_default_if_missing() {
-        let path = dirs_config_path();
+        let mut path = dirs_config_path();
         if path.exists() {
             return;
         }
+        // Ensure parent directory exists; if creation fails, try a HOME-based fallback.
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                error!("could not create config dir {:?}: {e}", parent);
+                if let Ok(home) = std::env::var("HOME") {
+                    let fallback_parent = std::path::PathBuf::from(home)
+                        .join(".config")
+                        .join("hypr-overlay");
+                    if let Err(e2) = std::fs::create_dir_all(&fallback_parent) {
+                        error!("fallback config dir creation failed: {e2}");
+                    } else {
+                        path = fallback_parent.join("config.toml");
+                    }
+                }
+            }
         }
+
         let content = r#"# hypr-overlay configuration
 # All fields are optional — remove any line to use the default.
 
@@ -114,10 +128,32 @@ font_size = 14.0
 # Start in compact mode (single row of avatars, no controls)
 compact_by_default = false
 "#;
-        if let Err(e) = std::fs::write(&path, content) {
-            error!("could not write default config: {e}");
-        } else {
-            info!("wrote default config to {path:?}");
+
+        // Try a straightforward write first; if it fails, attempt a create+write.
+        match std::fs::write(&path, content) {
+            Ok(_) => {
+                info!("wrote default config to {path:?}");
+                return;
+            }
+            Err(e) => {
+                error!("could not write default config: {e}, attempting create/open");
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                match std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
+                    Ok(mut f) => {
+                        use std::io::Write;
+                        if let Err(e2) = f.write_all(content.as_bytes()) {
+                            error!("failed to write default config after create: {e2}");
+                        } else {
+                            info!("wrote default config to {path:?}");
+                        }
+                    }
+                    Err(e3) => {
+                        error!("could not create default config file: {e3}");
+                    }
+                }
+            }
         }
     }
 }
