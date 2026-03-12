@@ -689,3 +689,51 @@ pub fn load_system_font() -> Option<fontdue::Font> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smoothstep_values() {
+        assert_eq!(smoothstep(0.0,1.0,0.0),0.0);
+        assert_eq!(smoothstep(0.0,1.0,1.0),1.0);
+        assert!((smoothstep(0.0,1.0,0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sdf_rrect_center_inside() {
+        let d = sdf_rrect(0.0,0.0,0.0,0.0,0.2,0.2,0.05);
+        assert!(d < 0.0);
+    }
+
+    #[test]
+    fn sdf_arc_behavior() {
+        let r = sdf_arc(0.0, -0.1, 0.0, 0.0, 0.28, 0.03, true);
+        assert!(r.is_finite());
+        let r2 = sdf_arc(0.0, 0.1, 0.0, 0.0, 0.28, 0.03, true);
+        assert_eq!(r2, 99.0);
+    }
+
+    #[test]
+    fn rasterize_alpha_all() {
+        let buf = rasterize(8, |_px,_py| -10.0);
+        assert_eq!(buf.len(), (8*8*4) as usize);
+        for i in 0..(8*8) {
+            assert!(buf[i*4 + 3] >= 250);
+        }
+    }
+
+    #[test]
+    fn icons_nonempty() {
+        let m = icon_mic(16);
+        assert_eq!(m.len(), (16*16*4) as usize);
+        assert!(m.iter().any(|b| *b != 0));
+        let h = icon_headphone(16);
+        assert_eq!(h.len(), (16*16*4) as usize);
+        assert!(h.iter().any(|b| *b != 0));
+        let s = icon_strikeout(16);
+        assert_eq!(s.len(), (16*16*4) as usize);
+        assert!(s.iter().any(|b| *b != 0));
+    }
+}

@@ -406,3 +406,34 @@ impl ProvidesRegistryState for App {
     }
     registry_handlers![OutputState, SeatState];
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn button_rects_basic() {
+        let (x,y,w,h) = button_rects(360,64);
+        assert_eq!(w,64);
+        assert_eq!(h,48);
+        assert_eq!(x, 360i32 - w - 8);
+        assert_eq!(y, 8);
+    }
+
+    #[test]
+    fn button2_rects_basic() {
+        let (x,_y,w,h) = button2_rects(360,64);
+        assert_eq!(w,64);
+        assert_eq!(h,48);
+        assert_eq!(x, 360i32 - w - 8 - w - 8);
+    }
+
+    #[test]
+    fn drag_handle() {
+        let (x,y,w,h) = drag_handle_rects(360,64);
+        assert_eq!(x,8);
+        assert_eq!(y,8);
+        assert_eq!(w,24);
+        assert!(h > 0);
+    }
+}

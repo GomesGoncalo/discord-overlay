@@ -823,3 +823,198 @@ fn is_timeout(e: &io::Error) -> bool {
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::io;
+
+    #[test]
+    fn parse_voice_state_basic() {
+        let vs = json!({
+            "user": {"id": "u1", "username": "bob", "avatar": "ahash"},
+            "voice_state": {"self_mute": true, "self_deaf": false, "mute": false, "deaf": false},
+            "mute": false,
+            "nick": "Bobby"
+        });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "u1");
+        assert_eq!(p.username, "bob");
+        assert_eq!(p.nick.as_deref(), Some("Bobby"));
+        assert_eq!(p.avatar_hash.as_deref(), Some("ahash"));
+        assert!(p.muted);
+        assert!(!p.deafened);
+    }
+
+    #[test]
+    fn parse_voice_state_missing_user() {
+        let vs = json!({ "voice_state": { "self_mute": false } });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "");
+        assert_eq!(p.username, "?");
+        assert!(p.nick.is_none());
+        assert!(p.avatar_hash.is_none());
+        assert!(!p.muted);
+        assert!(!p.deafened);
+    }
+
+    #[test]
+    fn parse_voice_state_server_mute() {
+        let vs = json!({
+            "user": {"id": "u2", "username": "alice"},
+            "voice_state": {"self_mute": false, "self_deaf": false, "mute": true, "deaf": false},
+            "mute": false
+        });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "u2");
+        assert!(p.muted);
+        assert!(!p.deafened);
+    }
+
+    #[test]
+    fn parse_voice_state_no_voice_state() {
+        let vs = json!({ "user": {"id": "u3", "username": "carol", "avatar": ""}, "nick": "" });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "u3");
+        assert_eq!(p.username, "carol");
+        assert!(p.avatar_hash.is_none());
+        assert!(!p.muted);
+        assert!(!p.deafened);
+    }
+
+    #[test]
+    fn parse_participants_array() {
+        let vs1 = json!({ "user": {"id": "u1", "username": "bob"}, "voice_state": {} });
+        let vs2 = json!({ "user": {"id": "u2", "username": "alice"}, "voice_state": {} });
+        let ch = json!({ "voice_states": [vs1, vs2] });
+        let parts = parse_participants(&ch);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].user_id, "u1");
+        assert_eq!(parts[1].user_id, "u2");
+    }
+
+    #[test]
+    fn is_timeout_kinds() {
+        let e1 = io::Error::new(io::ErrorKind::WouldBlock, "");
+        let e2 = io::Error::new(io::ErrorKind::TimedOut, "");
+        let e3 = io::Error::other("");
+        assert!(is_timeout(&e1));
+        assert!(is_timeout(&e2));
+        assert!(!is_timeout(&e3));
+    }
+
+    #[test]
+    fn dispatch_event_get_voice_settings() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({
+            "cmd": "GET_VOICE_SETTINGS",
+            "nonce": "gvs",
+            "data": { "mute": true, "deaf": false, "mode": { "type": "PUSH_TO_TALK" } }
+        });
+        dispatch_event(&v, &tx);
+        let e1 = rx.recv().unwrap();
+        match e1 {
+            DiscordEvent::VoiceSettings { mute, deaf } => {
+                assert!(mute);
+                assert!(!deaf);
+            }
+            _ => panic!("expected VoiceSettings"),
+        }
+        let e2 = rx.recv().unwrap();
+        match e2 {
+            DiscordEvent::VoiceMode { ptt } => assert!(ptt),
+            _ => panic!("expected VoiceMode"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_voice_settings_update_without_mode() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({ "evt": "VOICE_SETTINGS_UPDATE", "data": { "mute": false, "deaf": false } });
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::VoiceSettings { mute, deaf } => {
+                assert!(!mute);
+                assert!(!deaf);
+            }
+            _ => panic!("expected VoiceSettings"),
+        }
+        // No second event (no mode provided)
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn dispatch_event_voice_settings_update_with_mode() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({ "evt": "VOICE_SETTINGS_UPDATE", "data": { "mute": false, "deaf": true, "mode": { "type": "VOICE_ACTIVITY" } } });
+        dispatch_event(&v, &tx);
+        let e1 = rx.recv().unwrap();
+        match e1 {
+            DiscordEvent::VoiceSettings { mute, deaf } => {
+                assert!(!mute);
+                assert!(deaf);
+            }
+            _ => panic!("expected VoiceSettings"),
+        }
+        let e2 = rx.recv().unwrap();
+        match e2 {
+            DiscordEvent::VoiceMode { ptt } => assert!(!ptt),
+            _ => panic!("expected VoiceMode"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_extra {
+    use super::*;
+    use serde_json::json;
+    use std::env;
+    use std::fs;
+    use std::os::unix::net::UnixListener;
+    use std::os::unix::net::UnixStream;
+    use std::time::SystemTime;
+
+    #[test]
+    fn token_path_save_load() {
+        let tmp = std::env::temp_dir().join(format!("hypr_token_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("HOME", &tmp);
+        // ensure cache dir is created and token is written
+        save_token("A_TOKEN", "B_REFRESH");
+        let loaded = load_token().expect("load_token");
+        assert_eq!(loaded.0, "A_TOKEN");
+        assert_eq!(loaded.1, "B_REFRESH");
+        let _ = fs::remove_file(token_path());
+        let _ = fs::remove_dir_all(tmp);
+        env::remove_var("HOME");
+    }
+
+    #[test]
+    fn find_socket_uses_runtime_dir() {
+        let tmp = std::env::temp_dir().join(format!("hypr_sock_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        env::set_var("XDG_RUNTIME_DIR", &tmp);
+        let sock = tmp.join("discord-ipc-0");
+        let _ = fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).expect("bind");
+        let s = find_socket();
+        assert!(s.is_some());
+        drop(listener);
+        let _ = fs::remove_file(&sock);
+        env::remove_var("XDG_RUNTIME_DIR");
+    }
+
+    #[test]
+    fn subscribe_for_channel_writes_expected() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let mut nonce = 0u64;
+        subscribe_for_channel(&mut a, "chan1", &mut nonce);
+        for _ in 0..5 {
+            let (_op, v) = read_frame(&mut b).expect("read");
+            assert_eq!(v["cmd"].as_str().unwrap(), "SUBSCRIBE");
+        }
+    }
+}

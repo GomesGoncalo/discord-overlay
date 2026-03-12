@@ -135,3 +135,48 @@ fn dirs_config_path() -> std::path::PathBuf {
         });
     base.join("hypr-overlay").join("config.toml")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+
+    #[test]
+    fn default_values() {
+        let d = Config::default();
+        assert_eq!(d.opacity, 0.9);
+        assert_eq!(d.max_visible_rows, 5);
+        assert_eq!(d.font_size, 14.0);
+        assert!(!d.compact_by_default);
+    }
+
+    #[test]
+    fn write_default_and_load() {
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("XDG_CONFIG_HOME", &tmp);
+        let cfg_path = config_path();
+        if cfg_path.exists() { let _ = fs::remove_file(&cfg_path); }
+        Config::write_default_if_missing();
+        assert!(cfg_path.exists());
+        let cfg = Config::load();
+        assert_eq!(cfg.opacity, 0.9);
+        let _ = fs::remove_file(&cfg_path);
+        let _ = fs::remove_dir_all(&tmp);
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn env_override() {
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("XDG_CONFIG_HOME", &tmp);
+        env::set_var("DISCORD_CLIENT_ID", "OVERRIDE_ID");
+        let cfg = Config::load();
+        assert_eq!(cfg.discord_client_id, "OVERRIDE_ID");
+        env::remove_var("DISCORD_CLIENT_ID");
+        let _ = fs::remove_dir_all(tmp);
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+}
