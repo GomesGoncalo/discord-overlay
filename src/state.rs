@@ -17,7 +17,7 @@ use glow::HasContext;
 use crate::config::Config;
 use crate::discord;
 use crate::handlers::{button2_rects, button_rects, drag_handle_rects};
-use crate::render::{render_text_texture, Egl};
+use crate::render::{render_text_texture, EglBackend};
 
 // ─── Participant state ────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ pub struct App {
     pub output_state: OutputState,
     pub compositor: CompositorState,
     pub layer: LayerSurface,
-    pub egl: Egl,
+    pub egl: Box<dyn EglBackend>,
     pub width: u32,
     pub height: u32,
     pub dragging: bool,
