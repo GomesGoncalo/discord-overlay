@@ -1,0 +1,22 @@
+[package]
+name = "hypr-overlay-wl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+smithay-client-toolkit = "0.20"
+calloop = "0.14"
+calloop-wayland-source = "0.4"
+log = "0.4"
+env_logger = "0.11.9"
+# EGL/GL rendering
+khronos-egl = { version = "6", features = ["dynamic"] }
+wayland-egl = "0.32"
+glow = "0.13"
+# Enable the C wayland backend so conn.backend().display_ptr() is available for EGL
+wayland-backend = { version = "0.3", features = ["client_system"] }
+# Discord IPC
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
+fontdue = "0.7"
+image = { version = "0.25", default-features = false, features = ["png"] }
