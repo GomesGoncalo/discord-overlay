@@ -62,6 +62,7 @@ pub struct App {
     pub participants: Vec<ParticipantState>,
     pub avatar_textures: HashMap<String, glow::NativeTexture>,
     pub name_textures: HashMap<String, (glow::NativeTexture, u32, u32)>,
+    pub initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)>,
     pub font: Option<fontdue::Font>,
     // Channel name display
     pub channel_name: Option<String>,
@@ -88,6 +89,11 @@ pub struct App {
     // Compact mode
     pub compact: bool,
     pub last_click_time: Option<std::time::Instant>,
+    // Push-to-talk
+    pub ptt_mode: bool,
+    pub ptt_active: bool,
+    // Local user identity (set from Ready event)
+    pub self_user_id: String,
 }
 
 // ─── App methods ─────────────────────────────────────────────────────────────
@@ -177,13 +183,22 @@ impl App {
         let pad = 4i32;
 
         // Collect per-participant data to avoid borrow conflicts during the draw loop.
-        let data: Vec<(f32, bool, Option<std::time::Instant>, String)> = self
+        let data: Vec<(f32, bool, Option<std::time::Instant>, String, String)> = self
             .participants
             .iter()
-            .map(|p| (p.anim, p.deafened, p.speaking_until, p.user_id.clone()))
+            .map(|p| {
+                (
+                    p.anim,
+                    p.deafened,
+                    p.speaking_until,
+                    p.user_id.clone(),
+                    p.display_name.clone(),
+                )
+            })
             .collect();
 
-        for (i, (anim, deafened, speaking_until, user_id)) in data.iter().enumerate() {
+        for (i, (anim, deafened, speaking_until, user_id, display_name)) in
+            data.iter().enumerate() {
             let x = pad + i as i32 * 48;
             let y = pad;
             let slot_op = op * anim;
@@ -233,6 +248,14 @@ impl App {
                     [r, g, b, slot_op],
                     avatar_size as f32 / 2.0,
                 );
+                // Initial letter centered on placeholder circle
+                self.ensure_initial_texture(user_id, display_name);
+                let initial_data = self.initials_textures.get(user_id).map(|&(t, w, h)| (t, w, h));
+                if let Some((tex, tw, th)) = initial_data {
+                    let ix = x as f32 + (avatar_size as f32 - tw as f32) * 0.5;
+                    let iy = y as f32 + (avatar_size as f32 - th as f32) * 0.5;
+                    self.egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, slot_op);
+                }
             }
         }
 
@@ -263,10 +286,25 @@ impl App {
         }
     }
 
+    pub fn ensure_initial_texture(&mut self, user_id: &str, display_name: &str) {
+        if self.initials_textures.contains_key(user_id) {
+            return;
+        }
+        let initial = display_name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_else(|| "?".to_string());
+        if let Some((tex, w, h)) = self.render_text_tex(&initial, 20.0) {
+            self.initials_textures.insert(user_id.to_string(), (tex, w, h));
+        }
+    }
+
     pub fn handle_discord_event(&mut self, event: discord::DiscordEvent) -> bool {
         match event {
-            discord::DiscordEvent::Ready { username } => {
+            discord::DiscordEvent::Ready { username, user_id } => {
                 info!("Discord connected as {username}");
+                self.self_user_id = user_id;
                 false
             }
             discord::DiscordEvent::VoiceSettings { mute, deaf } => {
@@ -274,6 +312,10 @@ impl App {
                 self.discord_mute = mute;
                 self.discord_deaf = deaf;
                 changed
+            }
+            discord::DiscordEvent::VoiceMode { ptt } => {
+                self.ptt_mode = ptt;
+                true
             }
             discord::DiscordEvent::VoiceParticipants {
                 participants: parts,
@@ -316,6 +358,11 @@ impl App {
                         self.egl.gl.delete_texture(tex);
                     }
                 }
+                for (_, (tex, _, _)) in self.initials_textures.drain() {
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
+                }
                 self.participants = parts
                     .iter()
                     .map(|p| ParticipantState {
@@ -335,6 +382,7 @@ impl App {
                     .collect();
                 for (uid, name) in user_names {
                     self.make_name_texture(&uid, &name);
+                    self.ensure_initial_texture(&uid, &name);
                 }
                 // Reset scroll when participant list is fully replaced
                 self.scroll_offset = 0;
@@ -377,6 +425,7 @@ impl App {
                     leaving: false,
                 });
                 self.make_name_texture(&uid, &name);
+                self.ensure_initial_texture(&uid, &name);
                 let extra = if self.participants.len() > self.max_visible_rows {
                     20
                 } else {
@@ -492,6 +541,11 @@ impl App {
                         self.egl.gl.delete_texture(tex);
                     }
                 }
+                for (_, (tex, _, _)) in self.initials_textures.drain() {
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
+                }
                 self.participants.clear();
                 self.discord_mute = false;
                 self.discord_deaf = false;
@@ -534,31 +588,35 @@ impl App {
             (hw as f32 * 0.5).min(10.0),
         );
 
-        // Right-side info: guild name (top), channel name (middle), timer (bottom)
-        // All right-aligned at x = width - tex_width - 12
+        // Left-side info: guild name (top), channel name (middle), timer (bottom)
+        // Positioned to the right of the drag handle (hx + hw + 8px gap)
+        let text_x = (hx + hw) as f32 + 8.0;
         if let Some((tex, tw, th)) = self.guild_name_tex {
-            let x = sw - tw as f32 - 12.0;
             self.egl
-                .draw_icon(x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
+                .draw_icon(text_x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
         }
         if let Some((tex, tw, th)) = self.channel_name_tex {
-            let x = sw - tw as f32 - 12.0;
             self.egl
-                .draw_icon(x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
+                .draw_icon(text_x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
         }
         if let Some((tex, tw, th)) = self.timer_tex {
-            let x = sw - tw as f32 - 12.0;
             self.egl
-                .draw_icon(x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
+                .draw_icon(text_x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
         }
 
         // Mute button background
         // When deafened, mic is implicitly muted too
         let effectively_muted = self.discord_mute || self.discord_deaf;
+        // PTT mode: dim the mic button when not transmitting
+        let mic_alpha = if self.ptt_mode && !self.ptt_active && !effectively_muted {
+            op * 0.35
+        } else {
+            op * 0.82
+        };
         let mute_base = if effectively_muted {
             [0.75, 0.15, 0.15, 0.88 * op]
         } else {
-            [0.12, 0.68, 0.28, 0.82 * op]
+            [0.12, 0.68, 0.28, mic_alpha]
         };
         self.egl.draw_rect(
             bx2 as f32, by2 as f32, bw2 as f32, bh2 as f32, sw, sh, mute_base, 10.0,
@@ -587,7 +645,7 @@ impl App {
             sw,
             sh,
             mic_tex,
-            op,
+            mic_alpha,
         );
         if effectively_muted {
             self.egl.draw_icon(
@@ -670,7 +728,7 @@ impl App {
         }
 
         // Collect visible participant data to avoid re-borrowing self in the loop
-        let visible: Vec<(usize, f32, bool, bool, bool, String)> = self
+        let visible: Vec<(usize, f32, bool, bool, bool, String, String)> = self
             .participants
             .iter()
             .enumerate()
@@ -688,11 +746,12 @@ impl App {
                     p.deafened,
                     speaking,
                     p.user_id.clone(),
+                    p.display_name.clone(),
                 )
             })
             .collect();
 
-        for (slot, (abs_idx, anim, muted, deafened, speaking, user_id)) in
+        for (slot, (abs_idx, anim, muted, deafened, speaking, user_id, display_name)) in
             visible.iter().enumerate()
         {
             let _ = abs_idx; // abs_idx available for future use; slot drives layout
@@ -765,6 +824,14 @@ impl App {
                     [c[0], c[1], c[2], 0.85 * row_anim_op],
                     av_size * 0.5,
                 );
+                // Initial letter centered on placeholder circle
+                self.ensure_initial_texture(user_id, display_name);
+                let initial_data = self.initials_textures.get(user_id).map(|&(t, w, h)| (t, w, h));
+                if let Some((tex, tw, th)) = initial_data {
+                    let ix = av_x + (av_size - tw as f32) * 0.5;
+                    let iy = av_y + (av_size - th as f32) * 0.5;
+                    self.egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, row_anim_op);
+                }
             }
 
             // Name text

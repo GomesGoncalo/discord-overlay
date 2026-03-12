@@ -41,10 +41,12 @@ pub struct Participant {
 /// Events sent from the Discord thread to the main thread.
 #[derive(Debug)]
 pub enum DiscordEvent {
-    /// Successfully authenticated; contains the Discord username.
-    Ready { username: String },
+    /// Successfully authenticated; contains the Discord username and user ID.
+    Ready { username: String, user_id: String },
     /// Current mute/deafen state (sent on connect and on change).
     VoiceSettings { mute: bool, deaf: bool },
+    /// Voice input mode: true = push-to-talk, false = voice activity.
+    VoiceMode { ptt: bool },
     /// Current participants in the voice channel (full replace).
     VoiceParticipants {
         participants: Vec<Participant>,
@@ -345,7 +347,7 @@ fn parse_participants(channel_data: &serde_json::Value) -> Vec<Participant> {
         .as_array()
         .cloned()
         .unwrap_or_default();
-    states.iter().map(|vs| parse_voice_state(vs)).collect()
+    states.iter().map(parse_voice_state).collect()
 }
 
 fn parse_voice_state(vs: &serde_json::Value) -> Participant {
@@ -529,6 +531,7 @@ fn try_connect(
     info!("authenticated");
     let _ = tx.send(DiscordEvent::Ready {
         username: local_username.clone(),
+        user_id: local_user_id.clone(),
     });
 
     // Get current voice settings + subscribe to updates
@@ -752,14 +755,6 @@ fn try_connect(
                             user_id: uid.to_string(),
                         });
                     }
-                } else if evt == "SPEAKING_END" {
-                    if let Some(uid) = v["data"]["user_id"].as_str() {
-                        debug!("speaking_end user_id={uid}");
-                        let _ = tx.send(DiscordEvent::SpeakingUpdate {
-                            user_id: uid.to_string(),
-                            speaking: false,
-                        });
-                    }
                 } else if evt == "ERROR" {
                     debug!(
                         "[discord] ERROR cmd={cmd:?} nonce={vnonce:?} msg={}",
@@ -802,6 +797,10 @@ fn dispatch_event(v: &Value, tx: &calloop::channel::Sender<DiscordEvent>) {
             let mute = v["data"]["mute"].as_bool().unwrap_or(false);
             let deaf = v["data"]["deaf"].as_bool().unwrap_or(false);
             let _ = tx.send(DiscordEvent::VoiceSettings { mute, deaf });
+            if let Some(mode_type) = v["data"]["mode"]["type"].as_str() {
+                let ptt = mode_type == "PUSH_TO_TALK";
+                let _ = tx.send(DiscordEvent::VoiceMode { ptt });
+            }
         }
         _ => {
             // Also handle GET_VOICE_SETTINGS response
@@ -809,6 +808,10 @@ fn dispatch_event(v: &Value, tx: &calloop::channel::Sender<DiscordEvent>) {
                 let mute = v["data"]["mute"].as_bool().unwrap_or(false);
                 let deaf = v["data"]["deaf"].as_bool().unwrap_or(false);
                 let _ = tx.send(DiscordEvent::VoiceSettings { mute, deaf });
+                if let Some(mode_type) = v["data"]["mode"]["type"].as_str() {
+                    let ptt = mode_type == "PUSH_TO_TALK";
+                    let _ = tx.send(DiscordEvent::VoiceMode { ptt });
+                }
             }
         }
     }

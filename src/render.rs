@@ -99,12 +99,10 @@ fn sdf_arc(px: f32, py: f32, cx: f32, cy: f32, r: f32, w: f32, bottom: bool) -> 
         } else {
             99.0
         }
+    } else if py >= cy {
+        ring
     } else {
-        if py >= cy {
-            ring
-        } else {
-            99.0
-        }
+        99.0
     }
 }
 
@@ -281,7 +279,7 @@ impl EglContext {
         // Load GL function pointers via glow
         let gl = unsafe {
             glow::Context::from_loader_function(|sym| match egl_inst.get_proc_address(sym) {
-                Some(f) => std::mem::transmute::<extern "system" fn(), *const c_void>(f),
+                Some(f) => f as *const c_void,
                 None => std::ptr::null(),
             })
         };
@@ -424,6 +422,7 @@ impl EglContext {
     }
 
     /// Render one rounded rectangle. Coordinates are in logical pixels, origin = top-left.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_rect(
         &self,
         px: f32,
@@ -480,6 +479,7 @@ impl EglContext {
     }
 
     /// Render an icon texture over a quad (same coord system as draw_rect).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_icon(
         &self,
         px: f32,
@@ -520,6 +520,7 @@ impl EglContext {
 
     /// Render a circular-clipped avatar texture.
     /// `desaturate`: 0.0 = full colour, 1.0 = greyscale (used for deafened participants).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_avatar(
         &self,
         px: f32,

@@ -121,6 +121,11 @@ fn main() {
                                 app.egl.gl.delete_texture(tex);
                             }
                         }
+                        if let Some((tex, _, _)) = app.initials_textures.remove(uid) {
+                            unsafe {
+                                app.egl.gl.delete_texture(tex);
+                            }
+                        }
                         if let Some(tex) = app.avatar_textures.remove(uid) {
                             unsafe {
                                 app.egl.gl.delete_texture(tex);
@@ -157,6 +162,18 @@ fn main() {
                         }
                     }
                     needs_redraw = true;
+                }
+
+                // Update ptt_active: true while the local user is speaking (PTT key held)
+                if app.ptt_mode {
+                    let self_speaking = app.participants.iter().any(|p| {
+                        p.user_id == app.self_user_id
+                            && p.speaking_until.map(|t| t > now).unwrap_or(false)
+                    });
+                    if app.ptt_active != self_speaking {
+                        app.ptt_active = self_speaking;
+                        needs_redraw = true;
+                    }
                 }
 
                 // Animate idle alpha (~250ms transition)
@@ -269,6 +286,7 @@ fn main() {
         participants: vec![],
         avatar_textures: std::collections::HashMap::new(),
         name_textures: std::collections::HashMap::new(),
+        initials_textures: std::collections::HashMap::new(),
         font: load_system_font(),
         channel_name: None,
         channel_name_tex: None,
@@ -286,6 +304,9 @@ fn main() {
         last_pointer_y: 0.0,
         compact: cfg.compact_by_default,
         last_click_time: None,
+        ptt_mode: false,
+        ptt_active: false,
+        self_user_id: String::new(),
         config: cfg,
     };
 

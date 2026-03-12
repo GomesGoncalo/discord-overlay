@@ -258,7 +258,7 @@ impl PointerHandler for App {
                                         .wl_surface()
                                         .data::<SurfaceData>()
                                         .map(|d| d.scale_factor())
-                                        .unwrap_or(1) as i32;
+                                        .unwrap_or(1);
                                 let surf_w = self.width as i32 * surf_scale;
                                 let surf_h = self.height as i32 * surf_scale;
 
