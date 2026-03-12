@@ -6,15 +6,14 @@
 
 mod config;
 mod discord;
+mod handlers;
 mod render;
 mod state;
-mod handlers;
 
 use std::sync::mpsc;
 
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
-use smithay_client_toolkit as sctk;
 use sctk::compositor::CompositorState;
 use sctk::output::OutputState;
 use sctk::reexports::client::globals::registry_queue_init;
@@ -24,19 +23,20 @@ use sctk::seat::keyboard::Modifiers;
 use sctk::seat::SeatState;
 use sctk::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerShell};
 use sctk::shell::WaylandSurface;
+use smithay_client_toolkit as sctk;
 
-use render::{EglContext, load_system_font};
-use state::App;
 use config::Config;
 use glow::HasContext;
-use tracing::{debug, info, warn};
+use render::{load_system_font, EglContext};
+use state::App;
+use tracing::{debug, error, info, warn};
 
 fn main() {
-    use tracing_subscriber::{EnvFilter, fmt};
+    use tracing_subscriber::{fmt, EnvFilter};
     fmt()
         .with_env_filter(
             EnvFilter::try_from_env("RUST_LOG")
-                .unwrap_or_else(|_| EnvFilter::new("hypr_overlay_wl=info"))
+                .unwrap_or_else(|_| EnvFilter::new("hypr_overlay_wl=info")),
         )
         .with_target(false)
         .with_thread_ids(false)
@@ -132,7 +132,11 @@ fn main() {
                     // Clamp scroll offset when participants are removed
                     let max_offset = app.participants.len().saturating_sub(app.max_visible_rows);
                     app.scroll_offset = app.scroll_offset.min(max_offset);
-                    let extra = if app.participants.len() > app.max_visible_rows { 20 } else { 0 };
+                    let extra = if app.participants.len() > app.max_visible_rows {
+                        20
+                    } else {
+                        0
+                    };
                     let new_h = 64 + app.visible_row_count() as u32 * 48 + extra;
                     app.resize_overlay(new_h);
                     if app.compact {
@@ -187,7 +191,9 @@ fn main() {
                             format!("{m}:{s:02}")
                         };
                         if let Some((tex, _, _)) = app.timer_tex.take() {
-                            unsafe { app.egl.gl.delete_texture(tex); }
+                            unsafe {
+                                app.egl.gl.delete_texture(tex);
+                            }
                         }
                         let new_tex = app.render_text_tex(&label, 12.0);
                         app.timer_tex = new_tex;
@@ -214,7 +220,9 @@ fn main() {
         )
         .unwrap();
 
-    let discord_cmd_tx = if !cfg.discord_client_id.is_empty() && !cfg.discord_client_secret.is_empty() {
+    let discord_cmd_tx = if !cfg.discord_client_id.is_empty()
+        && !cfg.discord_client_secret.is_empty()
+    {
         let (tx, rx) = mpsc::sync_channel(32);
         discord::spawn(
             discord::Config {
@@ -227,7 +235,7 @@ fn main() {
         info!("Discord IPC enabled — waiting for connection...");
         Some(tx)
     } else {
-        info!(
+        error!(
             "Discord IPC disabled — set discord_client_id and discord_client_secret in\n  ~/.config/hypr-overlay/config.toml"
         );
         None
@@ -289,11 +297,18 @@ fn main() {
         std::thread::spawn(move || {
             let mut inotify = match Inotify::init() {
                 Ok(i) => i,
-                Err(e) => { warn!("inotify init failed: {e}"); return; }
+                Err(e) => {
+                    warn!("inotify init failed: {e}");
+                    return;
+                }
             };
             if let Some(dir) = config_path.parent() {
-                if let Err(e) = inotify.watches().add(dir, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO) {
-                    warn!("inotify watch add failed: {e}"); return;
+                if let Err(e) = inotify
+                    .watches()
+                    .add(dir, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO)
+                {
+                    warn!("inotify watch add failed: {e}");
+                    return;
                 }
             }
             let config_filename = config_path.file_name().map(|f| f.to_owned());
@@ -302,13 +317,18 @@ fn main() {
                 match inotify.read_events_blocking(&mut buf) {
                     Ok(events) => {
                         let changed = events.into_iter().any(|e| {
-                            e.name.map(|n| Some(n) == config_filename.as_deref()).unwrap_or(false)
+                            e.name
+                                .map(|n| Some(n) == config_filename.as_deref())
+                                .unwrap_or(false)
                         });
                         if changed {
                             let _ = inotify_reload_tx.send(());
                         }
                     }
-                    Err(e) => { warn!("inotify read error: {e}"); break; }
+                    Err(e) => {
+                        warn!("inotify read error: {e}");
+                        break;
+                    }
                 }
             }
         });
@@ -321,12 +341,19 @@ fn main() {
                 app.opacity = new_cfg.opacity;
                 app.max_visible_rows = new_cfg.max_visible_rows;
                 // Regenerate participant name textures with (possibly) new font size
-                let user_ids: Vec<String> = app.participants.iter().map(|p| p.user_id.clone()).collect();
-                let names: Vec<String> = app.participants.iter().map(|p| p.display_name.clone()).collect();
+                let user_ids: Vec<String> =
+                    app.participants.iter().map(|p| p.user_id.clone()).collect();
+                let names: Vec<String> = app
+                    .participants
+                    .iter()
+                    .map(|p| p.display_name.clone())
+                    .collect();
                 app.config = new_cfg;
                 for (uid, name) in user_ids.iter().zip(names.iter()) {
                     if let Some((tex, _, _)) = app.name_textures.remove(uid) {
-                        unsafe { app.egl.gl.delete_texture(tex); }
+                        unsafe {
+                            app.egl.gl.delete_texture(tex);
+                        }
                     }
                     app.make_name_texture(uid, name);
                 }

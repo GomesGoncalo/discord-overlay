@@ -13,8 +13,8 @@
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
-use tracing::{debug, info, warn, error};
 use std::time::Duration;
+use tracing::{debug, error, info, warn};
 
 use serde_json::{json, Value};
 
@@ -603,7 +603,9 @@ fn try_connect(
                 // GET_GUILD response
                 if cmd == "GET_GUILD" && vnonce == "get_guild" {
                     if let Some(name) = v["data"]["name"].as_str() {
-                        let _ = tx.send(DiscordEvent::GuildName { name: name.to_string() });
+                        let _ = tx.send(DiscordEvent::GuildName {
+                            name: name.to_string(),
+                        });
                     }
                 }
                 // GET_SELECTED_VOICE_CHANNEL response (match by cmd+nonce)
@@ -698,7 +700,9 @@ fn try_connect(
                             }),
                         );
                     } else {
-                        let _ = tx.send(DiscordEvent::GuildName { name: String::new() });
+                        let _ = tx.send(DiscordEvent::GuildName {
+                            name: String::new(),
+                        });
                         let _ = tx.send(DiscordEvent::VoiceParticipants {
                             participants: vec![],
                             channel_name: None,

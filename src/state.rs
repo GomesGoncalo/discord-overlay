@@ -2,22 +2,22 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use tracing::{debug, info};
 
-use smithay_client_toolkit as sctk;
 use sctk::compositor::{CompositorState, Region};
 use sctk::output::OutputState;
+use sctk::reexports::client::protocol::wl_output;
 use sctk::registry::RegistryState;
 use sctk::seat::keyboard::Modifiers;
 use sctk::seat::SeatState;
 use sctk::shell::wlr_layer::{Anchor, LayerSurface};
 use sctk::shell::WaylandSurface;
-use sctk::reexports::client::protocol::wl_output;
+use smithay_client_toolkit as sctk;
 
 use glow::HasContext;
 
-use crate::render::{render_text_texture, upload_texture_wh, EglContext};
-use crate::discord;
 use crate::config::Config;
-use crate::handlers::{button_rects, button2_rects, drag_handle_rects};
+use crate::discord;
+use crate::handlers::{button2_rects, button_rects, drag_handle_rects};
+use crate::render::{render_text_texture, upload_texture_wh, EglContext};
 
 // ─── Participant state ────────────────────────────────────────────────────────
 
@@ -98,7 +98,11 @@ impl App {
     }
 
     /// Rasterise `text` at `px_size` and upload it as a GL texture.
-    pub fn render_text_tex(&self, text: &str, px_size: f32) -> Option<(glow::NativeTexture, u32, u32)> {
+    pub fn render_text_tex(
+        &self,
+        text: &str,
+        px_size: f32,
+    ) -> Option<(glow::NativeTexture, u32, u32)> {
         let font = self.font.as_ref()?;
         let (pixels, w, h) = render_text_texture(font, text, px_size);
         if w > 0 && h > 0 {
@@ -136,7 +140,11 @@ impl App {
             self.layer.set_size(w, 48);
         } else {
             let n = self.visible_row_count();
-            let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
+            let extra = if self.participants.len() > self.max_visible_rows {
+                20
+            } else {
+                0
+            };
             let h = 64 + n as u32 * 48 + extra;
             self.width = 360;
             self.height = h;
@@ -158,7 +166,9 @@ impl App {
         let sw = self.width as f32;
         let sh = self.height as f32; // always 48 in compact mode
         unsafe {
-            self.egl.gl.viewport(0, 0, self.width as i32, self.height as i32);
+            self.egl
+                .gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
             self.egl.gl.clear_color(0.0, 0.0, 0.0, 0.0);
             self.egl.gl.clear(glow::COLOR_BUFFER_BIT);
         }
@@ -279,7 +289,9 @@ impl App {
                 } else if !self.in_channel {
                     self.channel_joined_at = None;
                     if let Some((tex, _, _)) = self.timer_tex.take() {
-                        unsafe { self.egl.gl.delete_texture(tex); }
+                        unsafe {
+                            self.egl.gl.delete_texture(tex);
+                        }
                     }
                 }
                 if self.channel_name != channel_name {
@@ -327,10 +339,16 @@ impl App {
                 // Reset scroll when participant list is fully replaced
                 self.scroll_offset = 0;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 self.last_scroll_state = (usize::MAX, usize::MAX);
-                let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
+                let extra = if self.participants.len() > self.max_visible_rows {
+                    20
+                } else {
+                    0
+                };
                 let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
                 self.resize_overlay(new_h);
                 if self.compact {
@@ -359,7 +377,11 @@ impl App {
                     leaving: false,
                 });
                 self.make_name_texture(&uid, &name);
-                let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
+                let extra = if self.participants.len() > self.max_visible_rows {
+                    20
+                } else {
+                    0
+                };
                 let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
                 self.resize_overlay(new_h);
                 if self.compact {
@@ -373,10 +395,7 @@ impl App {
                     .iter_mut()
                     .find(|p| p.user_id == user_id && !p.leaving)
                 {
-                    info!(
-                        "{} leaving channel (animating out)",
-                        p.display_name
-                    );
+                    info!("{} leaving channel (animating out)", p.display_name);
                     p.leaving = true;
                     return true; // trigger a redraw to start the animation
                 }
@@ -420,7 +439,9 @@ impl App {
             }
             discord::DiscordEvent::GuildName { name } => {
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 if name.is_empty() {
                     self.guild_name = None;
@@ -442,16 +463,22 @@ impl App {
                 // Clear guild name
                 self.guild_name = None;
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 // Clear session timer
                 self.channel_joined_at = None;
                 if let Some((tex, _, _)) = self.timer_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 // Clear scroll indicator
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 self.scroll_offset = 0;
                 self.last_scroll_state = (usize::MAX, usize::MAX);
@@ -511,15 +538,18 @@ impl App {
         // All right-aligned at x = width - tex_width - 12
         if let Some((tex, tw, th)) = self.guild_name_tex {
             let x = sw - tw as f32 - 12.0;
-            self.egl.draw_icon(x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
+            self.egl
+                .draw_icon(x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
         }
         if let Some((tex, tw, th)) = self.channel_name_tex {
             let x = sw - tw as f32 - 12.0;
-            self.egl.draw_icon(x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
+            self.egl
+                .draw_icon(x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
         }
         if let Some((tex, tw, th)) = self.timer_tex {
             let x = sw - tw as f32 - 12.0;
-            self.egl.draw_icon(x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
+            self.egl
+                .draw_icon(x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
         }
 
         // Mute button background
@@ -610,16 +640,20 @@ impl App {
             if scroll_state != self.last_scroll_state {
                 self.last_scroll_state = scroll_state;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe { self.egl.gl.delete_texture(tex); }
+                    unsafe {
+                        self.egl.gl.delete_texture(tex);
+                    }
                 }
                 let above = self.scroll_offset;
-                let below = self.participants.len()
+                let below = self
+                    .participants
+                    .len()
                     .saturating_sub(self.scroll_offset + self.max_visible_rows);
                 let label = match (above > 0, below > 0) {
-                    (true, true)  => format!("↑{}  ↓{}", above, below),
+                    (true, true) => format!("↑{}  ↓{}", above, below),
                     (true, false) => format!("↑{} more above", above),
                     (false, true) => format!("↓{} more below", below),
-                    _             => String::new(),
+                    _ => String::new(),
                 };
                 if !label.is_empty() {
                     let new_tex = self.render_text_tex(&label, 11.0);
@@ -628,7 +662,9 @@ impl App {
             }
         } else if self.scroll_indicator_tex.is_some() {
             if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                unsafe { self.egl.gl.delete_texture(tex); }
+                unsafe {
+                    self.egl.gl.delete_texture(tex);
+                }
             }
             self.last_scroll_state = (usize::MAX, usize::MAX);
         }
@@ -645,7 +681,14 @@ impl App {
                     .speaking_until
                     .map(|t| t > std::time::Instant::now())
                     .unwrap_or(false);
-                (abs_idx, p.anim, p.muted, p.deafened, speaking, p.user_id.clone())
+                (
+                    abs_idx,
+                    p.anim,
+                    p.muted,
+                    p.deafened,
+                    speaking,
+                    p.user_id.clone(),
+                )
             })
             .collect();
 
@@ -669,7 +712,12 @@ impl App {
                 row_h as f32 - 8.0,
                 sw,
                 sh,
-                [self.config.bg_color[0], self.config.bg_color[1], self.config.bg_color[2], 0.6 * row_anim_op],
+                [
+                    self.config.bg_color[0],
+                    self.config.bg_color[1],
+                    self.config.bg_color[2],
+                    0.6 * row_anim_op,
+                ],
                 8.0,
             );
 
@@ -683,7 +731,12 @@ impl App {
                     av_size + ring * 2.0,
                     sw,
                     sh,
-                    [self.config.speaking_color[0], self.config.speaking_color[1], self.config.speaking_color[2], 0.9 * row_anim_op],
+                    [
+                        self.config.speaking_color[0],
+                        self.config.speaking_color[1],
+                        self.config.speaking_color[2],
+                        0.9 * row_anim_op,
+                    ],
                     (av_size + ring * 2.0) * 0.5,
                 );
             }
@@ -735,7 +788,11 @@ impl App {
             let icon_y = row_y_f + (row_h as f32 - icon_sz) * 0.5;
             let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
             let hp_x = sw - icon_sz - 8.0;
-            let mic_op = if *muted { row_anim_op * 0.9 } else { row_anim_op * 0.35 };
+            let mic_op = if *muted {
+                row_anim_op * 0.9
+            } else {
+                row_anim_op * 0.35
+            };
             if *muted {
                 self.egl.draw_rect(
                     mic_x - 2.0,
@@ -744,7 +801,12 @@ impl App {
                     icon_sz + 4.0,
                     sw,
                     sh,
-                    [self.config.muted_color[0], self.config.muted_color[1], self.config.muted_color[2], 0.6 * row_anim_op],
+                    [
+                        self.config.muted_color[0],
+                        self.config.muted_color[1],
+                        self.config.muted_color[2],
+                        0.6 * row_anim_op,
+                    ],
                     4.0,
                 );
             }
@@ -752,11 +814,21 @@ impl App {
                 .draw_icon(mic_x, icon_y, icon_sz, icon_sz, sw, sh, mic_tex, mic_op);
             if *muted {
                 self.egl.draw_icon(
-                    mic_x, icon_y, icon_sz, icon_sz, sw, sh, strike_tex,
+                    mic_x,
+                    icon_y,
+                    icon_sz,
+                    icon_sz,
+                    sw,
+                    sh,
+                    strike_tex,
                     row_anim_op * 0.85,
                 );
             }
-            let hp_op = if *deafened { row_anim_op * 0.9 } else { row_anim_op * 0.35 };
+            let hp_op = if *deafened {
+                row_anim_op * 0.9
+            } else {
+                row_anim_op * 0.35
+            };
             if *deafened {
                 self.egl.draw_rect(
                     hp_x - 2.0,
@@ -765,7 +837,12 @@ impl App {
                     icon_sz + 4.0,
                     sw,
                     sh,
-                    [self.config.muted_color[0], self.config.muted_color[1], self.config.muted_color[2], 0.6 * row_anim_op],
+                    [
+                        self.config.muted_color[0],
+                        self.config.muted_color[1],
+                        self.config.muted_color[2],
+                        0.6 * row_anim_op,
+                    ],
                     4.0,
                 );
             }
@@ -773,7 +850,13 @@ impl App {
                 .draw_icon(hp_x, icon_y, icon_sz, icon_sz, sw, sh, hp_tex, hp_op);
             if *deafened {
                 self.egl.draw_icon(
-                    hp_x, icon_y, icon_sz, icon_sz, sw, sh, strike_tex,
+                    hp_x,
+                    icon_y,
+                    icon_sz,
+                    icon_sz,
+                    sw,
+                    sh,
+                    strike_tex,
                     row_anim_op * 0.85,
                 );
             }
@@ -783,14 +866,20 @@ impl App {
         if self.participants.len() > self.max_visible_rows {
             let indicator_y = 64.0 + self.visible_row_count() as f32 * row_h as f32;
             self.egl.draw_rect(
-                0.0, indicator_y, sw, 20.0, sw, sh,
+                0.0,
+                indicator_y,
+                sw,
+                20.0,
+                sw,
+                sh,
                 [0.15, 0.15, 0.18, op * 0.9],
                 0.0,
             );
             if let Some((tex, tw, th)) = self.scroll_indicator_tex {
                 let tx = (sw - tw as f32) * 0.5;
                 let ty = indicator_y + (20.0 - th as f32) * 0.5;
-                self.egl.draw_icon(tx, ty, tw as f32, th as f32, sw, sh, tex, op * 0.7);
+                self.egl
+                    .draw_icon(tx, ty, tw as f32, th as f32, sw, sh, tex, op * 0.7);
             }
         }
 

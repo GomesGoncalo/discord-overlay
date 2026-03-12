@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(default)]
@@ -66,8 +66,12 @@ impl Config {
             }
         };
         // Env vars override config file (useful for secrets in systemd unit overrides)
-        if let Ok(v) = std::env::var("DISCORD_CLIENT_ID") { cfg.discord_client_id = v; }
-        if let Ok(v) = std::env::var("DISCORD_CLIENT_SECRET") { cfg.discord_client_secret = v; }
+        if let Ok(v) = std::env::var("DISCORD_CLIENT_ID") {
+            cfg.discord_client_id = v;
+        }
+        if let Ok(v) = std::env::var("DISCORD_CLIENT_SECRET") {
+            cfg.discord_client_secret = v;
+        }
         cfg
     }
 

@@ -1,12 +1,12 @@
 use std::ffi::c_void;
 use tracing::info;
 
-use smithay_client_toolkit as sctk;
-use sctk::reexports::client::Connection;
-use sctk::reexports::client::protocol::wl_surface::WlSurface;
-use sctk::reexports::client::Proxy;
 use glow::HasContext;
 use khronos_egl as egl;
+use sctk::reexports::client::protocol::wl_surface::WlSurface;
+use sctk::reexports::client::Connection;
+use sctk::reexports::client::Proxy;
+use smithay_client_toolkit as sctk;
 use wayland_egl::WlEglSurface;
 
 // ─── GLSL shaders (GLES2 / #version 100) ─────────────────────────────────────
@@ -552,8 +552,11 @@ impl EglContext {
                 .vertex_attrib_pointer_f32(self.loc_pos, 2, glow::FLOAT, false, 16, 0);
             self.gl
                 .vertex_attrib_pointer_f32(self.loc_local, 2, glow::FLOAT, false, 16, 8);
-            self.gl.uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
-            let u_des = self.gl.get_uniform_location(self.avatar_prog, "u_desaturate");
+            self.gl
+                .uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
+            let u_des = self
+                .gl
+                .get_uniform_location(self.avatar_prog, "u_desaturate");
             self.gl.uniform_1_f32(u_des.as_ref(), desaturate);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             self.gl.use_program(Some(self.program));

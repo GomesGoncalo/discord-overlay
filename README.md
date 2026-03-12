@@ -1,5 +1,8 @@
 # hypr-overlay
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Build](https://img.shields.io/badge/build-passing-brightgreen)](#build--run)
+
 A Wayland-native Discord voice overlay for Hyprland, written in Rust.
 
 Displays your current voice channel participants with speaking indicators, mute/deafen controls, and smooth join/leave animations — rendered directly on a `zwlr_layer_shell_v1` surface with EGL/GLES2.
@@ -9,14 +12,19 @@ Displays your current voice channel participants with speaking indicators, mute/
 - **Voice participant list** — avatars (fetched from Discord CDN), display names, per-user mute/deafen icons
 - **Speaking indicators** — green ring around avatar while a participant is speaking (1.5 s timeout)
 - **Mute / Deafen buttons** — click to toggle; state synced from Discord in real time
-- **Channel name** — shown in the control bar
+- **Guild + channel name** — shown in the control bar with session duration timer
+- **Compact mode** — double-click drag handle for a minimal avatar-only strip
+- **Deafened avatars** — rendered in greyscale as an instant visual cue
 - **Smooth animations** — participants slide in/out on join/leave (~180 ms)
-- **Idle fade** — overlay dims to 30 % opacity when not in a voice channel
-- **Scroll to adjust opacity** — scroll wheel over the overlay changes global opacity (0.1 – 1.0)
-- **Drag to reposition** — hold Super and drag the overlay anywhere on screen
-- **Click-through** — only the control buttons and drag handle are interactive; the rest passes clicks through
-- **Auto-reconnect** — reconnects to Discord IPC with exponential backoff (1 s → 30 s) if Discord restarts
-- **Token refresh** — detects expired OAuth tokens, clears the cache, and re-authenticates automatically
+- **Hidden when idle** — fully transparent and click-through when not in a voice channel
+- **Scroll to adjust opacity** — scroll wheel over the control bar changes global opacity (0.1 – 1.0)
+- **Scrollable participant list** — scroll over participant area when there are more than `max_visible_rows`
+- **Drag to reposition** — hold Super and drag anywhere on screen
+- **Click-through** — only buttons and drag handle are interactive; the rest passes clicks through
+- **Auto-reconnect** — exponential backoff (1 s → 30 s) if Discord restarts
+- **Token refresh** — detects expired OAuth tokens and re-authenticates automatically
+- **Config hot-reload** — edit `~/.config/hypr-overlay/config.toml` and changes apply live
+- **systemd user service** — autostart with your Hyprland session
 
 ## Architecture
 
@@ -28,6 +36,7 @@ Displays your current voice channel participants with speaking indicators, mute/
 | Discord IPC | Unix socket RPC (OAuth2 `rpc`, `rpc.voice.read`, `rpc.voice.write`) |
 | Text rendering | `fontdue` (NotoSans or first available system font) |
 | Avatar images | `ureq` HTTP + `image` PNG decode, uploaded as GL textures |
+| Logging | `tracing` + `tracing-subscriber` (RUST_LOG filter) |
 
 ## Dependencies
 
@@ -57,29 +66,27 @@ To force re-authentication:
 rm ~/.cache/hypr-overlay/discord-token.json
 ```
 
-## Autostart with systemd
-
-Install the binary and service:
+## Install & Autostart
 
 ```bash
-# Build release binary
-cargo build --release
-
-# Install binary
-install -Dm755 target/release/hypr-overlay-wl ~/.local/bin/hypr-overlay-wl
-
-# Install systemd service
-install -Dm644 assets/hypr-overlay.service ~/.config/systemd/user/hypr-overlay.service
-
-# Enable and start
-systemctl --user daemon-reload
+make install
 systemctl --user enable --now hypr-overlay
+```
+
+To update a running installation:
+```bash
+make reinstall
 ```
 
 To check status or logs:
 ```bash
 systemctl --user status hypr-overlay
 journalctl --user -u hypr-overlay -f
+```
+
+To uninstall:
+```bash
+make uninstall
 ```
 
 ## Configuration
@@ -98,18 +105,17 @@ Edit it to customise the overlay — changes are applied live without restarting
 | `speaking_color` | `[0.23, 0.77, 0.33]` | Speaking ring colour |
 | `muted_color` | `[0.80, 0.15, 0.15]` | Muted/deafened indicator colour |
 | `font_size` | `14.0` | Participant name font size (px) |
+| `compact_by_default` | `false` | Start in compact mode |
 
 Get your credentials at <https://discord.com/developers/applications> — create an app, copy the **Application ID** as `discord_client_id`, then go to OAuth2 and copy the **Client Secret** as `discord_client_secret`.
 
-Env vars `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` override the config file values (useful for systemd unit drop-ins or CI).
-
 ## Environment variables
 
-| Variable | Description |
-|---|---|
-| `OVERLAY_OPACITY` | Overrides `opacity` from config |
-| `DISCORD_CLIENT_ID` | Overrides `discord_client_id` from config |
-| `DISCORD_CLIENT_SECRET` | Overrides `discord_client_secret` from config |
+| Variable | Default | Description |
+|---|---|---|
+| `OVERLAY_OPACITY` | — | Overrides `opacity` from config |
+| `DISCORD_CLIENT_ID` | — | Overrides `discord_client_id` from config |
+| `DISCORD_CLIENT_SECRET` | — | Overrides `discord_client_secret` from config |
 | `RUST_LOG` | `hypr_overlay_wl=info` | Log level filter (e.g. `debug`, `hypr_overlay_wl::discord=trace`) |
 
 ## Controls
@@ -118,15 +124,30 @@ Env vars `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` override the config fil
 |---|---|
 | Toggle mute | Click mic button |
 | Toggle deafen | Click headphone button |
-| Adjust opacity | Scroll wheel anywhere on overlay |
+| Adjust opacity | Scroll wheel over control bar |
+| Scroll participants | Scroll wheel over participant list |
 | Move overlay | Hold Super + drag |
+| Toggle compact mode | Double-click drag handle |
 
 ## Hyprland config
 
 The overlay uses `zwlr_layer_shell_v1` (overlay layer) and manages its own position, so no Hyprland window rules are required.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports, feature requests and pull requests are welcome.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Notes
 
 - GLES2 has no `fwidth()` — avatar circle AA uses a fixed constant instead.
 - `SPEAKING_END` is not a valid Discord RPC event; speaking state expires via a 1.5 s client-side timer.
 - EGL display is obtained via the `eglGetDisplay` classic path (Mesa fallback) rather than `eglGetPlatformDisplay`, which fails with `BadParameter` on some Mesa configurations.
+

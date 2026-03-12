@@ -2,6 +2,13 @@
 name = "hypr-overlay-wl"
 version = "0.1.0"
 edition = "2021"
+description = "Wayland-native Discord voice overlay for Hyprland"
+homepage = "https://github.com/ggomes/discord-overlay"
+repository = "https://github.com/ggomes/discord-overlay"
+license = "MIT"
+keywords = ["wayland", "discord", "hyprland", "overlay", "voice"]
+categories = ["multimedia"]
+readme = "README.md"
 
 [dependencies]
 smithay-client-toolkit = "0.20"

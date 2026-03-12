@@ -3,7 +3,7 @@ INSTALL_BIN := $(HOME)/.local/bin/$(BINARY)
 SERVICE    := assets/hypr-overlay.service
 INSTALL_SVC := $(HOME)/.config/systemd/user/hypr-overlay.service
 
-.PHONY: all install uninstall clean
+.PHONY: all install reinstall uninstall clean
 
 all:
 	cargo build --release
@@ -15,6 +15,15 @@ install: all
 	@echo ""
 	@echo "Installed $(BINARY) to $(INSTALL_BIN)"
 	@echo "To enable autostart: systemctl --user enable --now hypr-overlay"
+
+reinstall: all
+	systemctl --user stop hypr-overlay 2>/dev/null || true
+	install -Dm755 target/release/$(BINARY) $(INSTALL_BIN)
+	install -Dm644 $(SERVICE) $(INSTALL_SVC)
+	systemctl --user daemon-reload
+	systemctl --user restart hypr-overlay 2>/dev/null || true
+	@echo ""
+	@echo "Reinstalled and restarted hypr-overlay"
 
 uninstall:
 	systemctl --user disable --now hypr-overlay 2>/dev/null || true

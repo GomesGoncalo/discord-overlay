@@ -1,15 +1,16 @@
 use std::num::NonZeroU32;
 
-use smithay_client_toolkit as sctk;
 use sctk::compositor::{CompositorHandler, SurfaceData};
 use sctk::output::{OutputHandler, OutputState};
-use sctk::registry::{ProvidesRegistryState, RegistryState};
-use sctk::reexports::client::protocol::{wl_output, wl_pointer, wl_seat};
 use sctk::reexports::client::protocol::wl_keyboard::WlKeyboard;
 use sctk::reexports::client::protocol::wl_surface::WlSurface;
+use sctk::reexports::client::protocol::{wl_output, wl_pointer, wl_seat};
 use sctk::reexports::client::{Connection, Proxy, QueueHandle};
-use sctk::seat::keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers, RepeatInfo};
-use sctk::seat::pointer::{BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler};
+use sctk::registry::{ProvidesRegistryState, RegistryState};
+use sctk::seat::keyboard::{
+    KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers, RepeatInfo,
+};
+use sctk::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT};
 use sctk::seat::{Capability, SeatHandler, SeatState};
 use sctk::shell::wlr_layer::{Anchor, LayerShellHandler, LayerSurface, LayerSurfaceConfigure};
 use sctk::shell::WaylandSurface;
@@ -17,6 +18,7 @@ use sctk::{
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
     delegate_registry, delegate_seat, registry_handlers,
 };
+use smithay_client_toolkit as sctk;
 
 use crate::discord;
 use crate::state::App;
@@ -194,14 +196,16 @@ impl PointerHandler for App {
                         if x >= bx && x < bx + bw && y >= by && y < by + bh {
                             // Deafen button
                             if let Some(ref tx) = self.discord_cmd_tx {
-                                let _ = tx.send(discord::DiscordCommand::SetDeaf(!self.discord_deaf));
+                                let _ =
+                                    tx.send(discord::DiscordCommand::SetDeaf(!self.discord_deaf));
                             }
                         }
                         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
                         if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
                             // Mute button
                             if let Some(ref tx) = self.discord_cmd_tx {
-                                let _ = tx.send(discord::DiscordCommand::SetMute(!self.discord_mute));
+                                let _ =
+                                    tx.send(discord::DiscordCommand::SetMute(!self.discord_mute));
                             }
                         }
                     }
@@ -297,7 +301,10 @@ impl PointerHandler for App {
                     if self.last_pointer_y > 64.0 && !self.participants.is_empty() {
                         // Scroll participant list: wheel-down increases offset (show further down)
                         if delta < 0.0 {
-                            let max_offset = self.participants.len().saturating_sub(self.max_visible_rows);
+                            let max_offset = self
+                                .participants
+                                .len()
+                                .saturating_sub(self.max_visible_rows);
                             self.scroll_offset = (self.scroll_offset + 1).min(max_offset);
                         } else {
                             self.scroll_offset = self.scroll_offset.saturating_sub(1);
