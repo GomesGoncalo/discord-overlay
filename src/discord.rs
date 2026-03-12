@@ -439,7 +439,9 @@ fn fetch_and_send_avatar(
             let mut buf = Vec::new();
             if resp.into_reader().read_to_end(&mut buf).is_ok() {
                 if let Ok(img) = image::load_from_memory(&buf) {
-                    let rgba = img.to_rgba8();
+                    let rgba = image::DynamicImage::from(img.to_rgba8())
+                        .flipv()
+                        .to_rgba8();
                     let (w, _h) = rgba.dimensions();
                     let size = w;
                     if size > 0 {
