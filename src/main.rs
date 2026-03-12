@@ -125,6 +125,9 @@ fn main() {
                     let extra = if app.participants.len() > app.max_visible_rows { 20 } else { 0 };
                     let new_h = 64 + app.visible_row_count() as u32 * 48 + extra;
                     app.resize_overlay(new_h);
+                    if app.compact {
+                        app.apply_compact_resize();
+                    }
                     needs_redraw = true;
                 }
 
@@ -263,6 +266,8 @@ fn main() {
         scroll_indicator_tex: None,
         last_scroll_state: (usize::MAX, usize::MAX),
         last_pointer_y: 0.0,
+        compact: cfg.compact_by_default,
+        last_click_time: None,
         config: cfg,
     };
 

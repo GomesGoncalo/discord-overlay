@@ -84,6 +84,9 @@ pub struct App {
     pub last_pointer_y: f64,
     // Runtime config
     pub config: Config,
+    // Compact mode
+    pub compact: bool,
+    pub last_click_time: Option<std::time::Instant>,
 }
 
 // ─── App methods ─────────────────────────────────────────────────────────────
@@ -118,6 +121,116 @@ impl App {
         self.height = new_h;
         self.egl.resize(self.width as i32, new_h as i32);
         self.layer.set_size(self.width, new_h);
+    }
+
+    /// Resize overlay for compact/normal mode. Call after toggling `self.compact`
+    /// or after participant count changes while in compact mode.
+    pub fn apply_compact_resize(&mut self) {
+        if self.compact {
+            let n = self.participants.len().max(1);
+            let w = (n as u32 * 48 + 16).max(120);
+            self.width = w;
+            self.height = 48;
+            self.egl.resize(w as i32, 48);
+            self.layer.set_size(w, 48);
+        } else {
+            let n = self.visible_row_count();
+            let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
+            let h = 64 + n as u32 * 48 + extra;
+            self.width = 360;
+            self.height = h;
+            self.egl.resize(360, h as i32);
+            self.layer.set_size(360, h);
+        }
+        // Re-apply margin so the top-left corner stays at drag_base_pos
+        // after the size change (compositor would otherwise reposition the surface).
+        let (x, y) = self.drag_base_pos;
+        self.anchor = Anchor::TOP | Anchor::LEFT;
+        self.layer.set_anchor(self.anchor);
+        self.layer.set_margin(y, 0, 0, x);
+        self.margins = (y, 0, 0, x);
+    }
+
+    /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
+    fn draw_compact(&mut self) {
+        let op = self.opacity * self.idle_alpha;
+        let sw = self.width as f32;
+        let sh = self.height as f32; // always 48 in compact mode
+        unsafe {
+            self.egl.gl.viewport(0, 0, self.width as i32, self.height as i32);
+            self.egl.gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            self.egl.gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+
+        let avatar_size = 40u32;
+        let pad = 4i32;
+
+        // Collect per-participant data to avoid borrow conflicts during the draw loop.
+        let data: Vec<(f32, bool, Option<std::time::Instant>, String)> = self
+            .participants
+            .iter()
+            .map(|p| (p.anim, p.deafened, p.speaking_until, p.user_id.clone()))
+            .collect();
+
+        for (i, (anim, deafened, speaking_until, user_id)) in data.iter().enumerate() {
+            let x = pad + i as i32 * 48;
+            let y = pad;
+            let slot_op = op * anim;
+
+            let speaking = speaking_until
+                .map(|t| t > std::time::Instant::now())
+                .unwrap_or(false);
+            if speaking {
+                let [sr, sg, sb] = self.config.speaking_color;
+                self.egl.draw_rect(
+                    (x - 2) as f32,
+                    (y - 2) as f32,
+                    (avatar_size + 4) as f32,
+                    (avatar_size + 4) as f32,
+                    sw,
+                    sh,
+                    [sr, sg, sb, slot_op],
+                    (avatar_size as f32 / 2.0) + 2.0,
+                );
+            }
+
+            let desaturate = if *deafened { 1.0_f32 } else { 0.0 };
+            if let Some(&tex) = self.avatar_textures.get(user_id) {
+                self.egl.draw_avatar(
+                    x as f32,
+                    y as f32,
+                    avatar_size as f32,
+                    sw,
+                    sh,
+                    tex,
+                    slot_op,
+                    desaturate,
+                );
+            } else {
+                // Placeholder circle with a colour derived from the user ID
+                let hash = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
+                let r = ((hash & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+                let g = (((hash >> 8) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+                let b = (((hash >> 16) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+                self.egl.draw_rect(
+                    x as f32,
+                    y as f32,
+                    avatar_size as f32,
+                    avatar_size as f32,
+                    sw,
+                    sh,
+                    [r, g, b, slot_op],
+                    avatar_size as f32 / 2.0,
+                );
+            }
+        }
+
+        // Entire surface is interactive (acts as drag handle) in compact mode.
+        let region = Region::new(&self.compositor).expect("region");
+        region.add(0, 0, self.width as i32, self.height as i32);
+        self.layer.set_input_region(Some(region.wl_region()));
+
+        self.egl.swap();
     }
 
     /// Remove all input regions so the overlay is fully click-through (used when hidden).
@@ -219,6 +332,9 @@ impl App {
                 let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
                 let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
                 self.resize_overlay(new_h);
+                if self.compact {
+                    self.apply_compact_resize();
+                }
                 true
             }
             discord::DiscordEvent::UserJoined(p) => {
@@ -245,6 +361,9 @@ impl App {
                 let extra = if self.participants.len() > self.max_visible_rows { 20 } else { 0 };
                 let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
                 self.resize_overlay(new_h);
+                if self.compact {
+                    self.apply_compact_resize();
+                }
                 true
             }
             discord::DiscordEvent::UserLeft { user_id } => {
@@ -356,6 +475,10 @@ impl App {
     }
 
     pub fn draw(&mut self) {
+        if self.compact {
+            self.draw_compact();
+            return;
+        }
         let op = self.opacity * self.idle_alpha;
         let (sw, sh) = (self.width as f32, self.height as f32);
         let (bx, by, bw, bh) = button_rects(self.width, 64);
@@ -566,8 +689,9 @@ impl App {
 
             // Avatar
             if let Some(&tex) = self.avatar_textures.get(user_id) {
+                let desaturate = if *deafened { 1.0_f32 } else { 0.0 };
                 self.egl
-                    .draw_avatar(av_x, av_y, av_size, sw, sh, tex, row_anim_op);
+                    .draw_avatar(av_x, av_y, av_size, sw, sh, tex, row_anim_op, desaturate);
             } else {
                 let hue = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
                 let colors = [

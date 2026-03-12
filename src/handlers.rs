@@ -179,6 +179,7 @@ impl PointerHandler for App {
                                 let top = (new_y - out_pos.1 * out_scale) / out_scale;
                                 self.layer.set_anchor(Anchor::TOP | Anchor::LEFT);
                                 self.layer.set_margin(top, 0, 0, left);
+                                self.margins = (top, 0, 0, left); // keep in sync with drag_base_pos
                                 self.draw(); // egl.swap() commits margin changes + buffer
                             }
                         }
@@ -188,23 +189,51 @@ impl PointerHandler for App {
                 Press { button, .. } => {
                     let (x, y) = (event.position.0 as i32, event.position.1 as i32);
 
-                    let (bx, by, bw, bh) = button_rects(self.width, 64);
-                    if x >= bx && x < bx + bw && y >= by && y < by + bh {
-                        // Deafen button
-                        if let Some(ref tx) = self.discord_cmd_tx {
-                            let _ = tx.send(discord::DiscordCommand::SetDeaf(!self.discord_deaf));
+                    if !self.compact {
+                        let (bx, by, bw, bh) = button_rects(self.width, 64);
+                        if x >= bx && x < bx + bw && y >= by && y < by + bh {
+                            // Deafen button
+                            if let Some(ref tx) = self.discord_cmd_tx {
+                                let _ = tx.send(discord::DiscordCommand::SetDeaf(!self.discord_deaf));
+                            }
                         }
-                    }
-                    let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
-                    if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
-                        // Mute button
-                        if let Some(ref tx) = self.discord_cmd_tx {
-                            let _ = tx.send(discord::DiscordCommand::SetMute(!self.discord_mute));
+                        let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
+                        if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
+                            // Mute button
+                            if let Some(ref tx) = self.discord_cmd_tx {
+                                let _ = tx.send(discord::DiscordCommand::SetMute(!self.discord_mute));
+                            }
                         }
                     }
 
-                    let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
-                    if button == BTN_LEFT && x >= hx && x < hx + hw && y >= hy && y < hy + hh {
+                    // Determine if the click lands on the drag handle area.
+                    // In compact mode the whole surface is the drag handle.
+                    let on_drag_handle = if self.compact {
+                        button == BTN_LEFT
+                    } else {
+                        let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
+                        button == BTN_LEFT && x >= hx && x < hx + hw && y >= hy && y < hy + hh
+                    };
+
+                    if on_drag_handle {
+                        // Double-click within 400 ms toggles compact mode
+                        let now = std::time::Instant::now();
+                        let is_double_click = self
+                            .last_click_time
+                            .map(|t| t.elapsed() < std::time::Duration::from_millis(400))
+                            .unwrap_or(false);
+                        self.last_click_time = Some(now);
+
+                        if is_double_click {
+                            self.compact = !self.compact;
+                            self.dragging = false; // cancel any in-progress drag
+                            self.last_click_time = None;
+                            self.apply_compact_resize();
+                            self.clear_input_region();
+                            self.draw();
+                            return;
+                        }
+
                         // Compute absolute surface position for drag reference
                         let outputs: Vec<_> = self
                             .layer

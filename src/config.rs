@@ -23,6 +23,8 @@ pub struct Config {
     pub muted_color: [f32; 3],
     /// Font size for participant names (pixels)
     pub font_size: f32,
+    /// Start in compact mode (single row of avatars, no controls)
+    pub compact_by_default: bool,
 }
 
 impl Default for Config {
@@ -38,6 +40,7 @@ impl Default for Config {
             speaking_color: [0.23, 0.77, 0.33],
             muted_color: [0.8, 0.15, 0.15],
             font_size: 14.0,
+            compact_by_default: false,
         }
     }
 }
@@ -102,6 +105,9 @@ muted_color    = [0.80, 0.15, 0.15]
 
 # Font size for participant names (pixels)
 font_size = 14.0
+
+# Start in compact mode (single row of avatars, no controls)
+compact_by_default = false
 "#;
         if let Err(e) = std::fs::write(&path, content) {
             eprintln!("[config] could not write default config: {e}");

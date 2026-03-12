@@ -54,19 +54,22 @@ void main() {
 }
 ";
 
-/// Avatar shader — clips the quad to a circle using SDF.
+/// Avatar shader — clips the quad to a circle using SDF, with optional greyscale desaturation.
 const AVATAR_FRAG_SRC: &str = r"
 precision mediump float;
 varying vec2 v_local;
 uniform sampler2D u_texture;
 uniform float u_opacity;
+uniform float u_desaturate;
 void main() {
     vec2 uv = v_local - 0.5;
     float d = length(uv) - 0.5 + 0.015;
     float aa = 0.015;
     float a = 1.0 - smoothstep(-aa, aa, d);
-    vec4 c = texture2D(u_texture, vec2(v_local.x, 1.0 - v_local.y));
-    gl_FragColor = vec4(c.rgb, c.a * a * u_opacity);
+    vec4 color = texture2D(u_texture, vec2(v_local.x, 1.0 - v_local.y));
+    float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+    color.rgb = mix(color.rgb, vec3(luma), u_desaturate);
+    gl_FragColor = vec4(color.rgb, color.a * a * u_opacity);
 }
 ";
 
@@ -515,6 +518,7 @@ impl EglContext {
     }
 
     /// Render a circular-clipped avatar texture.
+    /// `desaturate`: 0.0 = full colour, 1.0 = greyscale (used for deafened participants).
     pub fn draw_avatar(
         &self,
         px: f32,
@@ -524,6 +528,7 @@ impl EglContext {
         surf_h: f32,
         tex: glow::NativeTexture,
         opacity: f32,
+        desaturate: f32,
     ) {
         let x0 = px / surf_w * 2.0 - 1.0;
         let x1 = (px + size) / surf_w * 2.0 - 1.0;
@@ -546,8 +551,9 @@ impl EglContext {
                 .vertex_attrib_pointer_f32(self.loc_pos, 2, glow::FLOAT, false, 16, 0);
             self.gl
                 .vertex_attrib_pointer_f32(self.loc_local, 2, glow::FLOAT, false, 16, 8);
-            self.gl
-                .uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
+            self.gl.uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
+            let u_des = self.gl.get_uniform_location(self.avatar_prog, "u_desaturate");
+            self.gl.uniform_1_f32(u_des.as_ref(), desaturate);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             self.gl.use_program(Some(self.program));
         }
