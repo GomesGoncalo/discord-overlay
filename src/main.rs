@@ -27,7 +27,7 @@ use smithay_client_toolkit as sctk;
 
 use config::Config;
 use glow::HasContext;
-use render::{load_system_font, EglContext};
+use render::{load_system_font, EglContext, EglBackend};
 use state::App;
 use tracing::{debug, error, info, warn};
 
@@ -65,12 +65,12 @@ fn main() {
     layer.set_margin(cfg.initial_y, 0, 0, cfg.initial_x);
     layer.commit();
 
-    let egl_ctx = {
+    let egl_ctx: Box<dyn EglBackend> = {
         #[cfg(not(test))] {
-            EglContext::new(&conn, layer.wl_surface(), 360, 64)
+            Box::new(EglContext::new(&conn, layer.wl_surface(), 360, 64))
         }
         #[cfg(test)] {
-            crate::render::MockEgl::new()
+            Box::new(crate::render::MockEgl::new())
         }
     };
 
