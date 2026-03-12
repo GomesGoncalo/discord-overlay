@@ -67,6 +67,8 @@ pub enum DiscordEvent {
         rgba: Vec<u8>,
         size: u32,
     },
+    /// Guild (server) name for the current voice channel.
+    GuildName { name: String },
     /// Connection lost.
     Disconnected,
 }
@@ -597,8 +599,14 @@ fn try_connect(
                 let vnonce = v["nonce"].as_str().unwrap_or("");
                 eprintln!("[discord] frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
 
+                // GET_GUILD response
+                if cmd == "GET_GUILD" && vnonce == "get_guild" {
+                    if let Some(name) = v["data"]["name"].as_str() {
+                        let _ = tx.send(DiscordEvent::GuildName { name: name.to_string() });
+                    }
+                }
                 // GET_SELECTED_VOICE_CHANNEL response (match by cmd+nonce)
-                if cmd == "GET_SELECTED_VOICE_CHANNEL" && vnonce == "gvsc" {
+                else if cmd == "GET_SELECTED_VOICE_CHANNEL" && vnonce == "gvsc" {
                     eprintln!("[discord] gvsc data: {}", v["data"]);
                     if !v["data"].is_null() {
                         let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
@@ -655,6 +663,19 @@ fn try_connect(
                             participants: parts,
                             channel_name,
                         });
+                        // Request the guild name if we're in a guild channel
+                        if let Some(guild_id) = v["data"]["guild_id"].as_str() {
+                            if !guild_id.is_empty() {
+                                send_cmd(
+                                    &mut stream,
+                                    json!({
+                                        "cmd": "GET_GUILD",
+                                        "args": { "guild_id": guild_id },
+                                        "nonce": "get_guild"
+                                    }),
+                                );
+                            }
+                        }
                     } else {
                         eprintln!("[discord] not in a voice channel");
                         let _ = tx.send(DiscordEvent::VoiceParticipants {
@@ -676,6 +697,7 @@ fn try_connect(
                             }),
                         );
                     } else {
+                        let _ = tx.send(DiscordEvent::GuildName { name: String::new() });
                         let _ = tx.send(DiscordEvent::VoiceParticipants {
                             participants: vec![],
                             channel_name: None,

@@ -4,6 +4,7 @@
 //! Click-through everywhere else via wl_surface.set_input_region.
 //! Discord IPC: set DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET to enable.
 
+mod config;
 mod discord;
 mod render;
 mod state;
@@ -26,11 +27,15 @@ use sctk::shell::WaylandSurface;
 
 use render::{EglContext, load_system_font};
 use state::App;
+use config::Config;
 use glow::HasContext;
 
 fn main() {
     env_logger::init();
     println!("Starting hypr-overlay-wl (EGL/GLES2)");
+
+    let cfg = Config::load();
+    Config::write_default_if_missing();
 
     let conn = Connection::connect_to_env().expect("Wayland connection failed");
     let (globals, event_queue) = registry_queue_init(&conn).expect("registry init failed");
@@ -43,10 +48,11 @@ fn main() {
     let layer =
         layer_shell.create_layer_surface(&qh, surface, Layer::Overlay, Some("hypr_overlay"), None);
 
-    layer.set_anchor(Anchor::TOP | Anchor::RIGHT);
+    layer.set_anchor(Anchor::TOP | Anchor::LEFT);
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
     layer.set_size(360, 64);
     layer.set_exclusive_zone(-1);
+    layer.set_margin(cfg.initial_y, 0, 0, cfg.initial_x);
     layer.commit();
 
     let egl_ctx = EglContext::new(&conn, layer.wl_surface(), 360, 64);
@@ -137,7 +143,8 @@ fn main() {
                 }
 
                 // Animate idle alpha (~250ms transition)
-                let target_alpha = if app.in_channel { 1.0_f32 } else { 0.3_f32 };
+                // Target is 1.0 when in channel, 0.0 when not (fully hidden)
+                let target_alpha = if app.in_channel { 1.0_f32 } else { 0.0_f32 };
                 if (app.idle_alpha - target_alpha).abs() > 0.005 {
                     let speed = 0.016 / 0.25;
                     if app.idle_alpha < target_alpha {
@@ -146,6 +153,11 @@ fn main() {
                         app.idle_alpha = (app.idle_alpha - speed).max(target_alpha);
                     }
                     needs_redraw = true;
+                }
+
+                // When fully hidden, clear the input region so no mouse events are consumed
+                if !app.in_channel && app.idle_alpha <= 0.005 && app.idle_alpha > -0.001 {
+                    app.clear_input_region();
                 }
 
                 // Update session timer texture every second
@@ -164,7 +176,7 @@ fn main() {
                         if let Some((tex, _, _)) = app.timer_tex.take() {
                             unsafe { app.egl.gl.delete_texture(tex); }
                         }
-                        let new_tex = app.render_text_tex(&label, 13.0);
+                        let new_tex = app.render_text_tex(&label, 12.0);
                         app.timer_tex = new_tex;
                         needs_redraw = true;
                     }
@@ -175,7 +187,7 @@ fn main() {
                 }
 
                 // Run at 16ms when animating, 500ms when idle or just tracking timer
-                let target_alpha = if app.in_channel { 1.0_f32 } else { 0.3_f32 };
+                let target_alpha = if app.in_channel { 1.0_f32 } else { 0.0_f32 };
                 let animating = app.participants.iter().any(|p| p.anim < 1.0 || p.leaving)
                     || (app.idle_alpha - target_alpha).abs() > 0.005;
                 let next = if animating {
@@ -189,29 +201,23 @@ fn main() {
         )
         .unwrap();
 
-    let discord_cmd_tx = match (
-        std::env::var("DISCORD_CLIENT_ID"),
-        std::env::var("DISCORD_CLIENT_SECRET"),
-    ) {
-        (Ok(id), Ok(secret)) => {
-            let (tx, rx) = mpsc::sync_channel(32);
-            discord::spawn(
-                discord::Config {
-                    client_id: id,
-                    client_secret: secret,
-                },
-                discord_ev_tx,
-                rx,
-            );
-            println!("Discord IPC enabled — waiting for connection...");
-            Some(tx)
-        }
-        _ => {
-            println!(
-                "Discord IPC disabled (set DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET to enable)"
-            );
-            None
-        }
+    let discord_cmd_tx = if !cfg.discord_client_id.is_empty() && !cfg.discord_client_secret.is_empty() {
+        let (tx, rx) = mpsc::sync_channel(32);
+        discord::spawn(
+            discord::Config {
+                client_id: cfg.discord_client_id.clone(),
+                client_secret: cfg.discord_client_secret.clone(),
+            },
+            discord_ev_tx,
+            rx,
+        );
+        println!("Discord IPC enabled — waiting for connection...");
+        Some(tx)
+    } else {
+        println!(
+            "Discord IPC disabled — set discord_client_id and discord_client_secret in\n  ~/.config/hypr-overlay/config.toml"
+        );
+        None
     };
 
     let mut app = App {
@@ -225,10 +231,10 @@ fn main() {
         height: 64,
         dragging: false,
         last_pointer: (0, 0),
-        drag_base_pos: (0, 0),
+        drag_base_pos: (cfg.initial_x, cfg.initial_y),
         drag_output: None,
-        margins: (12, 12, 0, 0),
-        anchor: Anchor::TOP | Anchor::RIGHT,
+        margins: (cfg.initial_y, 0, 0, cfg.initial_x),
+        anchor: Anchor::TOP | Anchor::LEFT,
         modifiers: Modifiers::default(),
         exit: false,
         discord_cmd_tx,
@@ -237,7 +243,7 @@ fn main() {
         opacity: std::env::var("OVERLAY_OPACITY")
             .ok()
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(0.9)
+            .unwrap_or(cfg.opacity)
             .clamp(0.1, 1.0),
         participants: vec![],
         avatar_textures: std::collections::HashMap::new(),
@@ -245,17 +251,74 @@ fn main() {
         font: load_system_font(),
         channel_name: None,
         channel_name_tex: None,
+        guild_name: None,
+        guild_name_tex: None,
         in_channel: false,
-        idle_alpha: 0.3,
+        idle_alpha: 0.0,
         channel_joined_at: None,
         timer_tex: None,
         last_timer_secs: u32::MAX,
         scroll_offset: 0,
-        max_visible_rows: 5,
+        max_visible_rows: cfg.max_visible_rows,
         scroll_indicator_tex: None,
         last_scroll_state: (usize::MAX, usize::MAX),
         last_pointer_y: 0.0,
+        config: cfg,
     };
+
+    // Config hot-reload via inotify: watch config dir and send () on changes
+    let (inotify_reload_tx, inotify_reload_rx) = calloop::channel::channel::<()>();
+    {
+        use inotify::{Inotify, WatchMask};
+        let config_path = config::config_path();
+        std::thread::spawn(move || {
+            let mut inotify = match Inotify::init() {
+                Ok(i) => i,
+                Err(e) => { eprintln!("[config] inotify init failed: {e}"); return; }
+            };
+            if let Some(dir) = config_path.parent() {
+                if let Err(e) = inotify.watches().add(dir, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO) {
+                    eprintln!("[config] inotify watch add failed: {e}"); return;
+                }
+            }
+            let config_filename = config_path.file_name().map(|f| f.to_owned());
+            let mut buf = [0u8; 1024];
+            loop {
+                match inotify.read_events_blocking(&mut buf) {
+                    Ok(events) => {
+                        let changed = events.into_iter().any(|e| {
+                            e.name.map(|n| Some(n) == config_filename.as_deref()).unwrap_or(false)
+                        });
+                        if changed {
+                            let _ = inotify_reload_tx.send(());
+                        }
+                    }
+                    Err(e) => { eprintln!("[config] inotify read error: {e}"); break; }
+                }
+            }
+        });
+    }
+    loop_handle
+        .insert_source(inotify_reload_rx, |event, _, app| {
+            if let calloop::channel::Event::Msg(()) = event {
+                eprintln!("[config] config file changed, reloading...");
+                let new_cfg = Config::load();
+                app.opacity = new_cfg.opacity;
+                app.max_visible_rows = new_cfg.max_visible_rows;
+                // Regenerate participant name textures with (possibly) new font size
+                let user_ids: Vec<String> = app.participants.iter().map(|p| p.user_id.clone()).collect();
+                let names: Vec<String> = app.participants.iter().map(|p| p.display_name.clone()).collect();
+                app.config = new_cfg;
+                for (uid, name) in user_ids.iter().zip(names.iter()) {
+                    if let Some((tex, _, _)) = app.name_textures.remove(uid) {
+                        unsafe { app.egl.gl.delete_texture(tex); }
+                    }
+                    app.make_name_texture(uid, name);
+                }
+                app.draw();
+            }
+        })
+        .expect("inotify reload source");
 
     let loop_signal = event_loop.get_signal();
     event_loop

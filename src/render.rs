@@ -592,7 +592,7 @@ pub unsafe fn upload_texture_wh(
         0,
         glow::RGBA,
         glow::UNSIGNED_BYTE,
-        Some(pixels),
+        glow::PixelUnpackData::Slice(Some(pixels)),
     );
     tex
 }

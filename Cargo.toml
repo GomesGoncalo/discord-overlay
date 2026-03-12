@@ -9,14 +9,14 @@ calloop = "0.14"
 calloop-wayland-source = "0.4"
 log = "0.4"
 env_logger = "0.11.9"
-# EGL/GL rendering
 khronos-egl = { version = "6", features = ["dynamic"] }
 wayland-egl = "0.32"
-glow = "0.13"
-# Enable the C wayland backend so conn.backend().display_ptr() is available for EGL
+glow = "0.17"
 wayland-backend = { version = "0.3", features = ["client_system"] }
-# Discord IPC
 serde_json = "1"
 ureq = { version = "2", features = ["json"] }
-fontdue = "0.7"
+fontdue = "0.9"
+toml = "1"
+serde = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+inotify = "0.11"

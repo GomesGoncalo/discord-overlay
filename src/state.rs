@@ -15,6 +15,7 @@ use glow::HasContext;
 
 use crate::render::{render_text_texture, upload_texture_wh, EglContext};
 use crate::discord;
+use crate::config::Config;
 use crate::handlers::{button_rects, button2_rects, drag_handle_rects};
 
 // ─── Participant state ────────────────────────────────────────────────────────
@@ -64,6 +65,9 @@ pub struct App {
     // Channel name display
     pub channel_name: Option<String>,
     pub channel_name_tex: Option<(glow::NativeTexture, u32, u32)>,
+    // Guild name display
+    pub guild_name: Option<String>,
+    pub guild_name_tex: Option<(glow::NativeTexture, u32, u32)>,
     // Idle fade state
     pub in_channel: bool,
     pub idle_alpha: f32,
@@ -78,6 +82,8 @@ pub struct App {
     pub last_scroll_state: (usize, usize),
     // Pointer Y position for scroll vs opacity decision
     pub last_pointer_y: f64,
+    // Runtime config
+    pub config: Config,
 }
 
 // ─── App methods ─────────────────────────────────────────────────────────────
@@ -114,9 +120,18 @@ impl App {
         self.layer.set_size(self.width, new_h);
     }
 
+    /// Remove all input regions so the overlay is fully click-through (used when hidden).
+    pub fn clear_input_region(&mut self) {
+        let region = Region::new(&self.compositor).expect("create region");
+        // Add nothing — empty region = fully click-through
+        self.layer.set_input_region(Some(region.wl_region()));
+        self.layer.wl_surface().commit();
+    }
+
     pub fn make_name_texture(&mut self, user_id: &str, name: &str) {
         if let Some(font) = &self.font {
-            let (pixels, w, h) = render_text_texture(font, name, 16.0);
+            let font_size = self.config.font_size;
+            let (pixels, w, h) = render_text_texture(font, name, font_size);
             if w > 0 && h > 0 {
                 let tex = unsafe { upload_texture_wh(&self.egl.gl, &pixels, w, h) };
                 self.name_textures.insert(user_id.to_string(), (tex, w, h));
@@ -162,7 +177,7 @@ impl App {
                     self.channel_name = channel_name.clone();
                     if let Some(ref name) = channel_name {
                         if let Some(font) = &self.font {
-                            let (pixels, w, h) = render_text_texture(font, name, 14.0);
+                            let (pixels, w, h) = render_text_texture(font, name, 13.0);
                             if w > 0 && h > 0 {
                                 let tex = unsafe { upload_texture_wh(&self.egl.gl, &pixels, w, h) };
                                 self.channel_name_tex = Some((tex, w, h));
@@ -283,6 +298,18 @@ impl App {
                 self.avatar_textures.insert(user_id, tex);
                 true
             }
+            discord::DiscordEvent::GuildName { name } => {
+                if let Some((tex, _, _)) = self.guild_name_tex.take() {
+                    unsafe { self.egl.gl.delete_texture(tex); }
+                }
+                if name.is_empty() {
+                    self.guild_name = None;
+                } else {
+                    self.guild_name_tex = self.render_text_tex(&name, 11.0);
+                    self.guild_name = Some(name);
+                }
+                true
+            }
             discord::DiscordEvent::Disconnected => {
                 // Clear all voice-channel state so the UI resets to idle.
                 self.in_channel = false;
@@ -291,6 +318,11 @@ impl App {
                     unsafe {
                         self.egl.gl.delete_texture(tex);
                     }
+                }
+                // Clear guild name
+                self.guild_name = None;
+                if let Some((tex, _, _)) = self.guild_name_tex.take() {
+                    unsafe { self.egl.gl.delete_texture(tex); }
                 }
                 // Clear session timer
                 self.channel_joined_at = None;
@@ -316,7 +348,7 @@ impl App {
                 self.participants.clear();
                 self.discord_mute = false;
                 self.discord_deaf = false;
-                self.idle_alpha = 0.3;
+                self.idle_alpha = 0.0;
                 self.resize_overlay(64);
                 true
             }
@@ -351,37 +383,19 @@ impl App {
             (hw as f32 * 0.5).min(10.0),
         );
 
-        // Channel name — rendered between drag handle and mute button
-        // When a timer is also shown, push name to upper half of the bar.
-        if let Some((tex, tw, th)) = self.channel_name_tex {
-            let name_x = (hx + hw) as f32 + 8.0;
-            let name_y = if self.timer_tex.is_some() {
-                8.0
-            } else {
-                (64.0 - th as f32) * 0.5
-            };
-            let max_w = (bx2 as f32 - name_x - 8.0).max(0.0);
-            let draw_w = (tw as f32).min(max_w);
-            if draw_w > 0.0 {
-                self.egl
-                    .draw_icon(name_x, name_y, draw_w, th as f32, sw, sh, tex, op);
-            }
+        // Right-side info: guild name (top), channel name (middle), timer (bottom)
+        // All right-aligned at x = width - tex_width - 12
+        if let Some((tex, tw, th)) = self.guild_name_tex {
+            let x = sw - tw as f32 - 12.0;
+            self.egl.draw_icon(x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
         }
-
-        // Session duration timer
+        if let Some((tex, tw, th)) = self.channel_name_tex {
+            let x = sw - tw as f32 - 12.0;
+            self.egl.draw_icon(x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
+        }
         if let Some((tex, tw, th)) = self.timer_tex {
-            let name_x = (hx + hw) as f32 + 8.0;
-            let max_w = (bx2 as f32 - name_x - 8.0).max(0.0);
-            let draw_w = (tw as f32).min(max_w);
-            let timer_y = if self.channel_name_tex.is_some() {
-                8.0 + 22.0 // below channel name (channel name is ~20px tall at 14px font)
-            } else {
-                (64.0 - th as f32) * 0.5
-            };
-            if draw_w > 0.0 {
-                self.egl
-                    .draw_icon(name_x, timer_y, draw_w, th as f32, sw, sh, tex, op * 0.7);
-            }
+            let x = sw - tw as f32 - 12.0;
+            self.egl.draw_icon(x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
         }
 
         // Mute button background
@@ -531,7 +545,7 @@ impl App {
                 row_h as f32 - 8.0,
                 sw,
                 sh,
-                [0.1, 0.1, 0.12, 0.6 * row_anim_op],
+                [self.config.bg_color[0], self.config.bg_color[1], self.config.bg_color[2], 0.6 * row_anim_op],
                 8.0,
             );
 
@@ -545,7 +559,7 @@ impl App {
                     av_size + ring * 2.0,
                     sw,
                     sh,
-                    [0.2, 0.85, 0.35, 0.9 * row_anim_op],
+                    [self.config.speaking_color[0], self.config.speaking_color[1], self.config.speaking_color[2], 0.9 * row_anim_op],
                     (av_size + ring * 2.0) * 0.5,
                 );
             }
@@ -605,7 +619,7 @@ impl App {
                     icon_sz + 4.0,
                     sw,
                     sh,
-                    [0.7, 0.15, 0.15, 0.6 * row_anim_op],
+                    [self.config.muted_color[0], self.config.muted_color[1], self.config.muted_color[2], 0.6 * row_anim_op],
                     4.0,
                 );
             }
@@ -626,7 +640,7 @@ impl App {
                     icon_sz + 4.0,
                     sw,
                     sh,
-                    [0.7, 0.15, 0.15, 0.6 * row_anim_op],
+                    [self.config.muted_color[0], self.config.muted_color[1], self.config.muted_color[2], 0.6 * row_anim_op],
                     4.0,
                 );
             }

@@ -1,0 +1,15 @@
+[Unit]
+Description=Discord voice overlay for Hyprland
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hypr-overlay-wl
+Restart=on-failure
+RestartSec=3s
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+[Install]
+WantedBy=graphical-session.target

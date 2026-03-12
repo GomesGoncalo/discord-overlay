@@ -57,11 +57,59 @@ To force re-authentication:
 rm ~/.cache/hypr-overlay/discord-token.json
 ```
 
+## Autostart with systemd
+
+Install the binary and service:
+
+```bash
+# Build release binary
+cargo build --release
+
+# Install binary
+install -Dm755 target/release/hypr-overlay-wl ~/.local/bin/hypr-overlay-wl
+
+# Install systemd service
+install -Dm644 assets/hypr-overlay.service ~/.config/systemd/user/hypr-overlay.service
+
+# Enable and start
+systemctl --user daemon-reload
+systemctl --user enable --now hypr-overlay
+```
+
+To check status or logs:
+```bash
+systemctl --user status hypr-overlay
+journalctl --user -u hypr-overlay -f
+```
+
+## Configuration
+
+On first run a default config is written to `~/.config/hypr-overlay/config.toml`.
+Edit it to customise the overlay — changes are applied live without restarting.
+
+| Key | Default | Description |
+|---|---|---|
+| `discord_client_id` | *(required)* | Discord app "Application ID" |
+| `discord_client_secret` | *(required)* | Discord app OAuth2 "Client Secret" |
+| `opacity` | `0.9` | Opacity when in a voice channel |
+| `max_visible_rows` | `5` | Rows before list scrolls |
+| `initial_x` / `initial_y` | `20` / `20` | Starting position (px) |
+| `bg_color` | `[0.12, 0.13, 0.16]` | Background colour (RGB 0–1) |
+| `speaking_color` | `[0.23, 0.77, 0.33]` | Speaking ring colour |
+| `muted_color` | `[0.80, 0.15, 0.15]` | Muted/deafened indicator colour |
+| `font_size` | `14.0` | Participant name font size (px) |
+
+Get your credentials at <https://discord.com/developers/applications> — create an app, copy the **Application ID** as `discord_client_id`, then go to OAuth2 and copy the **Client Secret** as `discord_client_secret`.
+
+Env vars `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` override the config file values (useful for systemd unit drop-ins or CI).
+
 ## Environment variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `OVERLAY_OPACITY` | `0.9` | Initial opacity (0.1 – 1.0) |
+| Variable | Description |
+|---|---|
+| `OVERLAY_OPACITY` | Overrides `opacity` from config |
+| `DISCORD_CLIENT_ID` | Overrides `discord_client_id` from config |
+| `DISCORD_CLIENT_SECRET` | Overrides `discord_client_secret` from config |
 
 ## Controls
 
