@@ -81,20 +81,15 @@ impl Config {
         if path.exists() {
             return;
         }
-        // Ensure parent directory exists; if creation fails, try a HOME-based fallback.
+        // Ensure parent directory exists; try to create it. If it fails, log and continue
+        // — we still attempt to write the config file to the requested XDG path.
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 error!("could not create config dir {:?}: {e}", parent);
-                if let Ok(home) = std::env::var("HOME") {
-                    let fallback_parent = std::path::PathBuf::from(home)
-                        .join(".config")
-                        .join("hypr-overlay");
-                    if let Err(e2) = std::fs::create_dir_all(&fallback_parent) {
-                        error!("fallback config dir creation failed: {e2}");
-                    } else {
-                        path = fallback_parent.join("config.toml");
-                    }
-                }
+                // Best-effort retry (in case of transient failures) and proceed to try writing
+                // the original config path. Do not silently switch to a HOME fallback as tests
+                // expect the configured XDG_CONFIG_HOME to be honoured.
+                let _ = std::fs::create_dir_all(parent);
             }
         }
 
