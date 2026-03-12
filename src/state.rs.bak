@@ -17,7 +17,7 @@ use glow::HasContext;
 use crate::config::Config;
 use crate::discord;
 use crate::handlers::{button2_rects, button_rects, drag_handle_rects};
-use crate::render::{render_text_texture, Egl};
+use crate::render::{render_text_texture, upload_texture_wh, EglContext};
 
 // ─── Participant state ────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ pub struct App {
     pub output_state: OutputState,
     pub compositor: CompositorState,
     pub layer: LayerSurface,
-    pub egl: Egl,
+    pub egl: EglContext,
     pub width: u32,
     pub height: u32,
     pub dragging: bool,
@@ -112,7 +112,7 @@ impl App {
         let font = self.font.as_ref()?;
         let (pixels, w, h) = render_text_texture(font, text, px_size);
         if w > 0 && h > 0 {
-            let tex = self.egl.upload_texture_wh(&pixels, w, h);
+            let tex = unsafe { upload_texture_wh(&self.egl.gl, &pixels, w, h) };
             Some((tex, w, h))
         } else {
             None
@@ -172,9 +172,11 @@ impl App {
         let sw = self.width as f32;
         let sh = self.height as f32; // always 48 in compact mode
         unsafe {
-            self.egl.viewport(0, 0, self.width as i32, self.height as i32);
-            self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
-            self.egl.clear(glow::COLOR_BUFFER_BIT);
+            self.egl
+                .gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
+            self.egl.gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            self.egl.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
         let avatar_size = 40u32;
@@ -278,7 +280,7 @@ impl App {
             let font_size = self.config.font_size;
             let (pixels, w, h) = render_text_texture(font, name, font_size);
             if w > 0 && h > 0 {
-                let tex = self.egl.upload_texture_wh(&pixels, w, h);
+                let tex = unsafe { upload_texture_wh(&self.egl.gl, &pixels, w, h) };
                 self.name_textures.insert(user_id.to_string(), (tex, w, h));
             }
         }
@@ -330,14 +332,14 @@ impl App {
                     self.channel_joined_at = None;
                     if let Some((tex, _, _)) = self.timer_tex.take() {
                         unsafe {
-                            self.egl.delete_texture(tex);
+                            self.egl.gl.delete_texture(tex);
                         }
                     }
                 }
                 if self.channel_name != channel_name {
                     if let Some((tex, _, _)) = self.channel_name_tex.take() {
                         unsafe {
-                            self.egl.delete_texture(tex);
+                            self.egl.gl.delete_texture(tex);
                         }
                     }
                     self.channel_name = channel_name.clone();
@@ -345,7 +347,7 @@ impl App {
                         if let Some(font) = &self.font {
                             let (pixels, w, h) = render_text_texture(font, name, 13.0);
                             if w > 0 && h > 0 {
-                                let tex = self.egl.upload_texture_wh(&pixels, w, h);
+                                let tex = unsafe { upload_texture_wh(&self.egl.gl, &pixels, w, h) };
                                 self.channel_name_tex = Some((tex, w, h));
                             }
                         }
@@ -353,12 +355,12 @@ impl App {
                 }
                 for (_, (tex, _, _)) in self.name_textures.drain() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 for (_, (tex, _, _)) in self.initials_textures.drain() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 self.participants = parts
@@ -386,7 +388,7 @@ impl App {
                 self.scroll_offset = 0;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 self.last_scroll_state = (usize::MAX, usize::MAX);
@@ -480,14 +482,14 @@ impl App {
                 rgba,
                 size,
             } => {
-                let tex = self.egl.upload_texture_wh(&rgba, size, size);
+                let tex = unsafe { upload_texture_wh(&self.egl.gl, &rgba, size, size) };
                 self.avatar_textures.insert(user_id, tex);
                 true
             }
             discord::DiscordEvent::GuildName { name } => {
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 if name.is_empty() {
@@ -504,44 +506,44 @@ impl App {
                 self.channel_name = None;
                 if let Some((tex, _, _)) = self.channel_name_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 // Clear guild name
                 self.guild_name = None;
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 // Clear session timer
                 self.channel_joined_at = None;
                 if let Some((tex, _, _)) = self.timer_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 // Clear scroll indicator
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 self.scroll_offset = 0;
                 self.last_scroll_state = (usize::MAX, usize::MAX);
                 for (_, tex) in self.avatar_textures.drain() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 for (_, (tex, _, _)) in self.name_textures.drain() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 for (_, (tex, _, _)) in self.initials_textures.drain() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 self.participants.clear();
@@ -566,10 +568,12 @@ impl App {
         let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
 
         unsafe {
-            self.egl.viewport(0, 0, self.width as i32, self.height as i32);
-            self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
-            self.egl.clear(glow::COLOR_BUFFER_BIT);
-            self.egl.use_main_program();
+            self.egl
+                .gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
+            self.egl.gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            self.egl.gl.clear(glow::COLOR_BUFFER_BIT);
+            self.egl.gl.use_program(Some(self.egl.program));
         }
 
         // Drag handle — blue pill
@@ -630,9 +634,9 @@ impl App {
 
         // Icon overlays — mic on mute button, headphone on deafen button
         let pad = 6.0f32;
-        let mic_tex = self.egl.tex_mic();
-        let hp_tex = self.egl.tex_headphone();
-        let strike_tex = self.egl.tex_strikeout();
+        let mic_tex = self.egl.tex_mic;
+        let hp_tex = self.egl.tex_headphone;
+        let strike_tex = self.egl.tex_strikeout;
         self.egl.draw_icon(
             bx2 as f32 + pad,
             by2 as f32 + pad,
@@ -695,7 +699,7 @@ impl App {
                 self.last_scroll_state = scroll_state;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
                     unsafe {
-                        self.egl.delete_texture(tex);
+                        self.egl.gl.delete_texture(tex);
                     }
                 }
                 let above = self.scroll_offset;
@@ -717,7 +721,7 @@ impl App {
         } else if self.scroll_indicator_tex.is_some() {
             if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
                 unsafe {
-                    self.egl.delete_texture(tex);
+                    self.egl.gl.delete_texture(tex);
                 }
             }
             self.last_scroll_state = (usize::MAX, usize::MAX);
@@ -845,9 +849,9 @@ impl App {
             }
 
             // Per-participant mute/deaf icons (right side of row)
-            let mic_tex = self.egl.tex_mic();
-            let hp_tex = self.egl.tex_headphone();
-            let strike_tex = self.egl.tex_strikeout();
+            let mic_tex = self.egl.tex_mic;
+            let hp_tex = self.egl.tex_headphone;
+            let strike_tex = self.egl.tex_strikeout;
             let icon_y = row_y_f + (row_h as f32 - icon_sz) * 0.5;
             let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
             let hp_x = sw - icon_sz - 8.0;

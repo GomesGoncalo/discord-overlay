@@ -65,14 +65,7 @@ fn main() {
     layer.set_margin(cfg.initial_y, 0, 0, cfg.initial_x);
     layer.commit();
 
-    let egl_ctx = {
-        #[cfg(not(test))] {
-            EglContext::new(&conn, layer.wl_surface(), 360, 64)
-        }
-        #[cfg(test)] {
-            crate::render::MockEgl::new()
-        }
-    };
+    let egl_ctx = EglContext::new(&conn, layer.wl_surface(), 360, 64);
 
     // Set up calloop event loop — integrates Wayland + Discord channel
     let mut event_loop: EventLoop<'static, App> = EventLoop::try_new().unwrap();
@@ -125,17 +118,17 @@ fn main() {
                         app.participants.remove(pos);
                         if let Some((tex, _, _)) = app.name_textures.remove(uid) {
                             unsafe {
-                                app.egl.delete_texture(tex);
+                                app.egl.gl.delete_texture(tex);
                             }
                         }
                         if let Some((tex, _, _)) = app.initials_textures.remove(uid) {
                             unsafe {
-                                app.egl.delete_texture(tex);
+                                app.egl.gl.delete_texture(tex);
                             }
                         }
                         if let Some(tex) = app.avatar_textures.remove(uid) {
                             unsafe {
-                                app.egl.delete_texture(tex);
+                                app.egl.gl.delete_texture(tex);
                             }
                         }
                     }
@@ -216,7 +209,7 @@ fn main() {
                         };
                         if let Some((tex, _, _)) = app.timer_tex.take() {
                             unsafe {
-                                app.egl.delete_texture(tex);
+                                app.egl.gl.delete_texture(tex);
                             }
                         }
                         let new_tex = app.render_text_tex(&label, 12.0);
@@ -380,7 +373,7 @@ fn main() {
                 for (uid, name) in user_ids.iter().zip(names.iter()) {
                     if let Some((tex, _, _)) = app.name_textures.remove(uid) {
                         unsafe {
-                            app.egl.delete_texture(tex);
+                            app.egl.gl.delete_texture(tex);
                         }
                     }
                     app.make_name_texture(uid, name);

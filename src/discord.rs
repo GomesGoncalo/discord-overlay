@@ -975,6 +975,7 @@ mod tests_extra {
     use std::os::unix::net::UnixListener;
     use std::os::unix::net::UnixStream;
     use std::time::SystemTime;
+    use std::io::{self, Cursor};
 
     #[test]
     fn token_path_save_load() {
@@ -1029,4 +1030,71 @@ mod tests_extra {
             assert_eq!(v["cmd"].as_str().unwrap(), "SUBSCRIBE");
         }
     }
+
+    #[test]
+    fn wait_for_ready_reads_ready() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let non_ready = json!({"evt": "NOT_READY"});
+        write_frame(&mut a, OP_FRAME, &non_ready.to_string()).expect("write");
+        let ready = json!({"evt": "READY", "data": { "user": { "id": "u1", "username": "bob" }}});
+        write_frame(&mut a, OP_FRAME, &ready.to_string()).expect("write");
+        let got = wait_for_ready(&mut b).expect("wait_for_ready");
+        assert_eq!(got["evt"].as_str().unwrap(), "READY");
+        assert_eq!(got["data"]["user"]["id"].as_str().unwrap(), "u1");
+    }
+
+    #[test]
+    fn read_frame_invalid_json() {
+        use std::io::Write;
+        let mut c = Cursor::new(Vec::new());
+        let op = 1u32;
+        let payload = b"not-json";
+        c.write_all(&op.to_le_bytes()).unwrap();
+        c.write_all(&(payload.len() as u32).to_le_bytes()).unwrap();
+        c.write_all(payload).unwrap();
+        c.set_position(0);
+        let res = read_frame(&mut c);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn dispatch_event_ptt_true() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({ "evt": "VOICE_SETTINGS_UPDATE", "data": { "mute": false, "deaf": false, "mode": { "type": "PUSH_TO_TALK" } } });
+        dispatch_event(&v, &tx);
+        let e1 = rx.recv().unwrap();
+        match e1 {
+            DiscordEvent::VoiceSettings { mute, deaf } => {
+                assert!(!mute);
+                assert!(!deaf);
+            }
+            _ => panic!("expected VoiceSettings"),
+        }
+        let e2 = rx.recv().unwrap();
+        match e2 {
+            DiscordEvent::VoiceMode { ptt } => assert!(ptt),
+            _ => panic!("expected VoiceMode"),
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn authenticate_invalid_token() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let err = json!({"nonce": "auth", "evt": "ERROR", "data": {"message": "invalid token"}});
+        write_frame(&mut b, OP_FRAME, &err.to_string()).unwrap();
+        let res = authenticate(&mut a, "TOKEN");
+        assert!(matches!(res, Err(AuthError::InvalidToken)));
+    }
+
+    #[test]
+    fn authenticate_success() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let ok = json!({"nonce":"auth","cmd":"AUTHENTICATE","data":{}});
+        write_frame(&mut b, OP_FRAME, &ok.to_string()).unwrap();
+        let res = authenticate(&mut a, "TOKEN2");
+        assert_eq!(res.unwrap(), "TOKEN2".to_string());
+    }
 }
+
