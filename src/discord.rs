@@ -1008,6 +1008,18 @@ mod tests_extra {
     }
 
     #[test]
+    fn frame_roundtrip() {
+        use std::io::Cursor;
+        let mut c = Cursor::new(Vec::new());
+        let payload = "{\"hello\":123}";
+        write_frame(&mut c, 42, payload).expect("write");
+        c.set_position(0);
+        let (op, v) = read_frame(&mut c).expect("read");
+        assert_eq!(op, 42);
+        assert_eq!(v["hello"].as_i64().unwrap(), 123);
+    }
+
+    #[test]
     fn subscribe_for_channel_writes_expected() {
         let (mut a, mut b) = UnixStream::pair().unwrap();
         let mut nonce = 0u64;
