@@ -411,6 +411,8 @@ impl App {
                         .anim(0.0) // start invisible, animate in
                         .build(),
                 );
+                // Mark as in_channel when we have participants
+                self.in_channel = true;
                 self.make_name_texture(&uid, &name);
                 self.ensure_initial_texture(&uid, &name);
                 let extra = if self.participants.len() > self.max_visible_rows {
@@ -423,6 +425,7 @@ impl App {
                 if self.compact {
                     self.apply_compact_resize();
                 }
+                debug!("UserJoined: Setting in_channel=true, now have {} participants", self.participants.len());
                 true
             }
             discord::DiscordEvent::UserLeft { user_id } => {
