@@ -605,6 +605,27 @@ fn try_connect(
                 let vnonce = v["nonce"].as_str().unwrap_or("");
                 debug!("frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
 
+                let (events, avatars, subscribe_channel, guild_id) = process_frame_events(&v, &local_user_id, &local_username, local_avatar.as_ref());
+                if !events.is_empty() || !avatars.is_empty() || subscribe_channel.is_some() || guild_id.is_some() {
+                    for (uid, hash) in avatars {
+                        fetch_and_send_avatar(uid, hash, tx.clone());
+                    }
+                    for e in events {
+                        let _ = tx.send(e);
+                    }
+                    if let Some(cid) = subscribe_channel {
+                        subscribe_for_channel(&mut stream, &cid, &mut nonce);
+                    }
+                    if let Some(gid) = guild_id {
+                        send_cmd(&mut stream, json!({
+                            "cmd": "GET_GUILD",
+                            "args": { "guild_id": gid },
+                            "nonce": "get_guild"
+                        }));
+                    }
+                    continue;
+                }
+
                 // GET_GUILD response
                 if cmd == "GET_GUILD" && vnonce == "get_guild" {
                     if let Some(name) = v["data"]["name"].as_str() {
@@ -789,6 +810,117 @@ fn wait_for_ready(stream: &mut UnixStream) -> Result<Value, ()> {
             Err(_) => return Err(()),
         }
     }
+}
+
+fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, local_avatar: Option<&String>) -> (Vec<DiscordEvent>, Vec<(String, String)>, Option<String>, Option<String>) {
+    let mut events = Vec::new();
+    let mut avatars: Vec<(String, String)> = Vec::new();
+    let mut subscribe_channel: Option<String> = None;
+    let mut guild_id: Option<String> = None;
+
+    let cmd = v["cmd"].as_str().unwrap_or("");
+    let evt = v["evt"].as_str().unwrap_or("");
+    let vnonce = v["nonce"].as_str().unwrap_or("");
+
+    // GET_GUILD response
+    if cmd == "GET_GUILD" && vnonce == "get_guild" {
+        if let Some(name) = v["data"]["name"].as_str() {
+            events.push(DiscordEvent::GuildName { name: name.to_string() });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    // GET_SELECTED_VOICE_CHANNEL response
+    if cmd == "GET_SELECTED_VOICE_CHANNEL" && vnonce == "gvsc" {
+        if !v["data"].is_null() {
+            let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
+            if !cid.is_empty() {
+                subscribe_channel = Some(cid.clone());
+            }
+            let others = parse_participants(&v["data"]);
+            let self_nick = others.iter().find(|p| p.user_id == local_user_id).and_then(|p| p.nick.clone());
+            let self_avatar = local_avatar.cloned().or_else(|| {
+                others.iter().find(|p| p.user_id == local_user_id).and_then(|p| p.avatar_hash.clone())
+            });
+            let self_muted = others.iter().find(|p| p.user_id == local_user_id).map(|p| p.muted).unwrap_or(false);
+            let self_deafened = others.iter().find(|p| p.user_id == local_user_id).map(|p| p.deafened).unwrap_or(false);
+            let mut parts = vec![Participant {
+                user_id: local_user_id.to_string(),
+                username: local_username.to_string(),
+                nick: self_nick,
+                avatar_hash: self_avatar.clone(),
+                muted: self_muted,
+                deafened: self_deafened,
+            }];
+            parts.extend(others.into_iter().filter(|p| p.user_id != local_user_id));
+            let channel_name = v["data"]["name"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+            for p in &parts {
+                if let Some(hash) = &p.avatar_hash {
+                    avatars.push((p.user_id.clone(), hash.clone()));
+                }
+            }
+            if let Some(gid) = v["data"]["guild_id"].as_str() {
+                if !gid.is_empty() { guild_id = Some(gid.to_string()); }
+            }
+            events.push(DiscordEvent::VoiceParticipants { participants: parts, channel_name });
+            return (events, avatars, subscribe_channel, guild_id);
+        } else {
+            events.push(DiscordEvent::VoiceParticipants { participants: vec![], channel_name: None });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "VOICE_CHANNEL_SELECT" {
+        let cid = v["data"]["channel_id"].as_str().unwrap_or("");
+        if !cid.is_empty() {
+            // request GET_SELECTED_VOICE_CHANNEL by sending 'gvsc' from caller
+            subscribe_channel = Some(cid.to_string());
+        } else {
+            events.push(DiscordEvent::GuildName { name: String::new() });
+            events.push(DiscordEvent::VoiceParticipants { participants: vec![], channel_name: None });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "SPEAKING_START" {
+        if let Some(uid) = v["data"]["user_id"].as_str() {
+            events.push(DiscordEvent::SpeakingUpdate { user_id: uid.to_string(), speaking: true });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "SPEAKING_END" {
+        if let Some(uid) = v["data"]["user_id"].as_str() {
+            events.push(DiscordEvent::SpeakingUpdate { user_id: uid.to_string(), speaking: false });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "VOICE_STATE_UPDATE" {
+        let p = parse_voice_state(&v["data"]);
+        if !p.user_id.is_empty() {
+            events.push(DiscordEvent::ParticipantStateUpdate { user_id: p.user_id, muted: p.muted, deafened: p.deafened });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "VOICE_STATE_CREATE" {
+        let p = parse_voice_state(&v["data"]);
+        if !p.user_id.is_empty() {
+            if let Some(hash) = &p.avatar_hash { avatars.push((p.user_id.clone(), hash.clone())); }
+            events.push(DiscordEvent::UserJoined(p));
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    if evt == "VOICE_STATE_DELETE" {
+        if let Some(uid) = v["data"]["user"]["id"].as_str() {
+            events.push(DiscordEvent::UserLeft { user_id: uid.to_string() });
+            return (events, avatars, subscribe_channel, guild_id);
+        }
+    }
+
+    (events, avatars, subscribe_channel, guild_id)
 }
 
 fn dispatch_event(v: &Value, tx: &calloop::channel::Sender<DiscordEvent>) {
@@ -1095,6 +1227,97 @@ mod tests_extra {
         write_frame(&mut b, OP_FRAME, &ok.to_string()).unwrap();
         let res = authenticate(&mut a, "TOKEN2");
         assert_eq!(res.unwrap(), "TOKEN2".to_string());
+    }
+
+    #[test]
+    fn process_frame_get_selected_empty() {
+        let v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc", "data": null});
+        let (events, avatars, subscribe, guild) = process_frame_events(&v, "local", "me", None);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+                assert!(participants.is_empty());
+                assert!(channel_name.is_none());
+            }
+            _ => panic!("expected VoiceParticipants"),
+        }
+        assert!(avatars.is_empty());
+        assert!(subscribe.is_none());
+        assert!(guild.is_none());
+    }
+
+    #[test]
+    fn process_frame_get_selected_with_data() {
+        let data = json!({
+            "id": "chan1",
+            "name": "Room",
+            "guild_id": "g1",
+            "voice_states": [
+                { "user": { "id": "local", "username": "me", "avatar": "ahash" }, "voice_state": { "self_mute": false, "self_deaf": false }, "nick": "MeNick" },
+                { "user": { "id": "u2", "username": "Bob", "avatar": "bh" }, "voice_state": {}, "nick": "BobNick" }
+            ]
+        });
+        let v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc", "data": data});
+        let (events, avatars, subscribe, guild) = process_frame_events(&v, "local", "me", None);
+        assert_eq!(subscribe, Some("chan1".to_string()));
+        assert_eq!(guild, Some("g1".to_string()));
+        assert_eq!(avatars.len(), 2);
+        match &events[0] {
+            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+                assert_eq!(participants[0].user_id, "local");
+                assert_eq!(participants.len(), 2);
+                assert_eq!(channel_name.as_deref(), Some("Room"));
+            }
+            _ => panic!("expected VoiceParticipants"),
+        }
+    }
+
+    #[test]
+    fn process_frame_speaking_start_end() {
+        let v1 = json!({"evt": "SPEAKING_START", "data": { "user_id": "u1" }});
+        let (events1, _avatars1, _sub1, _g1) = process_frame_events(&v1, "", "", None);
+        assert_eq!(events1.len(), 1);
+        match &events1[0] {
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => { assert_eq!(user_id, "u1"); assert!( *speaking ); }
+            _ => panic!("expected SpeakingUpdate"),
+        }
+        let v2 = json!({"evt": "SPEAKING_END", "data": { "user_id": "u1" }});
+        let (events2, _avatars2, _sub2, _g2) = process_frame_events(&v2, "", "", None);
+        assert_eq!(events2.len(), 1);
+        match &events2[0] {
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => { assert_eq!(user_id, "u1"); assert!( !*speaking ); }
+            _ => panic!("expected SpeakingUpdate"),
+        }
+    }
+
+    #[test]
+    fn process_frame_voice_state_update_create_delete() {
+        let v_up = json!({"evt": "VOICE_STATE_UPDATE", "data": { "user": { "id": "u3", "username": "carol" }, "voice_state": { "self_mute": true } }});
+        let (events_up, _a, _s, _g) = process_frame_events(&v_up, "", "", None);
+        assert_eq!(events_up.len(), 1);
+        match &events_up[0] {
+            DiscordEvent::ParticipantStateUpdate { user_id, muted, deafened } => { assert_eq!(user_id, "u3"); assert!(*muted); assert!(!*deafened); }
+            _ => panic!("expected ParticipantStateUpdate"),
+        }
+
+        let v_create = json!({"evt": "VOICE_STATE_CREATE", "data": { "user": { "id": "u5", "username": "eve", "avatar": "h1" }, "voice_state": { "self_mute": false } }});
+        let (events_c, avatars_c, _s2, _g2) = process_frame_events(&v_create, "", "", None);
+        assert_eq!(events_c.len(), 1);
+        match &events_c[0] {
+            DiscordEvent::UserJoined(p) => { assert_eq!(p.user_id, "u5"); }
+            _ => panic!("expected UserJoined"),
+        }
+        assert_eq!(avatars_c.len(), 1);
+        assert_eq!(avatars_c[0].0, "u5");
+        assert_eq!(avatars_c[0].1, "h1");
+
+        let v_del = json!({"evt": "VOICE_STATE_DELETE", "data": { "user": { "id": "u4" } }});
+        let (events_d, _a2, _s3, _g3) = process_frame_events(&v_del, "", "", None);
+        assert_eq!(events_d.len(), 1);
+        match &events_d[0] {
+            DiscordEvent::UserLeft { user_id } => { assert_eq!(user_id, "u4"); }
+            _ => panic!("expected UserLeft"),
+        }
     }
 }
 
