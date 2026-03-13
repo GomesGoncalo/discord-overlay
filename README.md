@@ -1,4 +1,4 @@
-# hypr-overlay
+# discord-overlay
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)](#build--run)
