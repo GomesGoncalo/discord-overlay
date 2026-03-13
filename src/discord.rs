@@ -428,7 +428,8 @@ fn subscribe_for_channel(stream: &mut UnixStream, channel_id: &str, nonce: &mut 
 }
 
 fn avatar_base_url() -> String {
-    std::env::var("HYPR_AVATAR_BASE_URL").unwrap_or_else(|_| "https://cdn.discordapp.com/avatars".to_string())
+    std::env::var("HYPR_AVATAR_BASE_URL")
+        .unwrap_or_else(|_| "https://cdn.discordapp.com/avatars".to_string())
 }
 
 fn fetch_and_send_avatar(
@@ -1468,15 +1469,23 @@ mod tests_extra {
     }
 
     #[test]
+    #[serial]
     fn avatar_base_url_default() {
         std::env::remove_var("HYPR_AVATAR_BASE_URL");
-        assert_eq!(avatar_base_url(), "https://cdn.discordapp.com/avatars".to_string());
+        assert_eq!(
+            avatar_base_url(),
+            "https://cdn.discordapp.com/avatars".to_string()
+        );
     }
 
     #[test]
+    #[serial]
     fn avatar_base_url_env_override() {
         std::env::set_var("HYPR_AVATAR_BASE_URL", "http://localhost:8000/avatars");
-        assert_eq!(avatar_base_url(), "http://localhost:8000/avatars".to_string());
+        assert_eq!(
+            avatar_base_url(),
+            "http://localhost:8000/avatars".to_string()
+        );
         std::env::remove_var("HYPR_AVATAR_BASE_URL");
     }
 
@@ -1484,13 +1493,21 @@ mod tests_extra {
     #[serial]
     fn try_auth_with_cached_token_success() {
         // Prepare a temporary HOME to control token_path
-        let tmp = std::env::temp_dir().join(format!("hypr_token_test_tryauth_{}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("hypr_token_test_tryauth_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::set_var("HOME", &tmp);
         let _ = std::fs::create_dir_all(std::path::Path::new(&tmp).join(".cache/hypr-overlay"));
-        std::fs::write(token_path(), json!({"access_token":"A_TOK","refresh_token":"R_TOK"}).to_string()).unwrap();
+        std::fs::write(
+            token_path(),
+            json!({"access_token":"A_TOK","refresh_token":"R_TOK"}).to_string(),
+        )
+        .unwrap();
 
-        let cfg = Config { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+        let cfg = Config {
+            client_id: "cid".to_string(),
+            client_secret: "cs".to_string(),
+        };
 
         let (mut a, mut b) = UnixStream::pair().unwrap();
         // Preload the authentication success frame on the peer so authenticate() reads it
