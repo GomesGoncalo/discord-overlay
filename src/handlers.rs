@@ -398,6 +398,8 @@ delegate_seat!(App);
 delegate_pointer!(App);
 delegate_layer!(App);
 delegate_registry!(App);
+
+
 delegate_keyboard!(App);
 
 impl ProvidesRegistryState for App {

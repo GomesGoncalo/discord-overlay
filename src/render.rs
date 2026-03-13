@@ -874,3 +874,27 @@ impl EglBackend for MockEgl {
     fn clear(&self, mask: u32) { self.clear(mask) }
     fn use_main_program(&self) { self.use_main_program() }
 }
+
+#[cfg(test)]
+mod mock_tests {
+    use super::*;
+
+    #[test]
+    fn mock_egl_methods_noop() {
+        let egl = MockEgl::new();
+        egl.resize(100, 50);
+        egl.viewport(0, 0, 100, 50);
+        egl.clear_color(0.1, 0.2, 0.3, 0.4);
+        egl.clear(glow::COLOR_BUFFER_BIT);
+        egl.use_main_program();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        egl.draw_rect(0.0, 0.0, 10.0, 10.0, 100.0, 50.0, [1.0, 1.0, 1.0, 1.0], 2.0);
+        egl.draw_icon(0.0, 0.0, 8.0, 8.0, 100.0, 50.0, tex, 0.5);
+        egl.draw_avatar(0.0, 0.0, 8.0, 100.0, 50.0, tex, 0.5, 0.0);
+        egl.delete_texture(tex);
+        let _ = egl.tex_mic();
+        let _ = egl.tex_headphone();
+        let _ = egl.tex_strikeout();
+        egl.swap();
+    }
+}

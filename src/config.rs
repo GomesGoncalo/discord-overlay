@@ -184,9 +184,10 @@ mod tests {
 
     #[test]
     fn write_default_and_load() {
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}", std::process::id()));
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
         let _ = fs::remove_dir_all(&tmp);
-        env::set_var("XDG_CONFIG_HOME", &tmp);
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
         let cfg_path = config_path();
         if cfg_path.exists() { let _ = fs::remove_file(&cfg_path); }
         Config::write_default_if_missing();
@@ -200,14 +201,32 @@ mod tests {
 
     #[test]
     fn env_override() {
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}", std::process::id()));
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
         let _ = fs::remove_dir_all(&tmp);
-        env::set_var("XDG_CONFIG_HOME", &tmp);
-        env::set_var("DISCORD_CLIENT_ID", "OVERRIDE_ID");
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        std::env::set_var("DISCORD_CLIENT_ID", "OVERRIDE_ID");
         let cfg = Config::load();
         assert_eq!(cfg.discord_client_id, "OVERRIDE_ID");
         env::remove_var("DISCORD_CLIENT_ID");
         let _ = fs::remove_dir_all(tmp);
         env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn load_with_invalid_toml_returns_default() {
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_parse_{}_{}", std::process::id(), tid));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        let cfg_path = config_path();
+        if let Some(parent) = cfg_path.parent() { let _ = std::fs::create_dir_all(parent); }
+        std::fs::write(&cfg_path, "this is not valid toml").unwrap();
+        let cfg = Config::load();
+        // default opacity is 0.9 in the default implementation
+        assert_eq!(cfg.opacity, 0.9);
+        let _ = std::fs::remove_file(&cfg_path);
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::remove_var("XDG_CONFIG_HOME");
     }
 }
