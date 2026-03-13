@@ -90,14 +90,13 @@ pub enum DiscordCommand {
 trait JsonExt {
     /// Extract string value, return empty string if missing or not a string.
     fn get_string(&self, key: &str) -> String;
-    
+
     /// Extract string value as Option, returns None if missing or empty.
     fn get_str_option(&self, key: &str) -> Option<String>;
-    
+
     /// Extract boolean value with default.
-    #[allow(dead_code)]
     fn get_bool(&self, key: &str, default: bool) -> bool;
-    
+
     /// Extract value at nested path like ["data"]["name"]
     #[allow(dead_code)]
     fn get_nested(&self, path: &[&str]) -> Option<Value>;
@@ -105,10 +104,7 @@ trait JsonExt {
 
 impl JsonExt for Value {
     fn get_string(&self, key: &str) -> String {
-        self[key]
-            .as_str()
-            .unwrap_or("")
-            .to_string()
+        self[key].as_str().unwrap_or("").to_string()
     }
 
     fn get_str_option(&self, key: &str) -> Option<String> {
@@ -221,8 +217,7 @@ trait EventHandler {
 struct GetGuildHandler;
 impl EventHandler for GetGuildHandler {
     fn matches(&self, v: &Value) -> bool {
-        v.get_string("cmd") == "GET_GUILD"
-            && v.get_string("nonce") == "get_guild"
+        v.get_string("cmd") == "GET_GUILD" && v.get_string("nonce") == "get_guild"
     }
 
     fn handle(
@@ -243,8 +238,7 @@ impl EventHandler for GetGuildHandler {
 struct VoiceChannelSelectHandler;
 impl EventHandler for VoiceChannelSelectHandler {
     fn matches(&self, v: &Value) -> bool {
-        v.get_string("cmd") == "GET_SELECTED_VOICE_CHANNEL"
-            && v.get_string("nonce") == "gvsc"
+        v.get_string("cmd") == "GET_SELECTED_VOICE_CHANNEL" && v.get_string("nonce") == "gvsc"
     }
 
     fn handle(
@@ -752,17 +746,16 @@ fn parse_voice_state(vs: &serde_json::Value) -> Participant {
     let server_mute = vs.get_bool("mute", false) || vs_inner.get_bool("mute", false);
     let server_deaf = vs_inner.get_bool("deaf", false);
 
-    let username = user.get_str_option("username").unwrap_or_else(|| "?".to_string());
+    let username = user
+        .get_str_option("username")
+        .unwrap_or_else(|| "?".to_string());
 
-    ParticipantBuilder::new(
-        &user.get_string("id"),
-        &username,
-    )
-    .nick(vs.get_str_option("nick"))
-    .avatar_hash(user.get_str_option("avatar"))
-    .muted(self_mute || server_mute)
-    .deafened(self_deaf || server_deaf)
-    .build()
+    ParticipantBuilder::new(&user.get_string("id"), &username)
+        .nick(vs.get_str_option("nick"))
+        .avatar_hash(user.get_str_option("avatar"))
+        .muted(self_mute || server_mute)
+        .deafened(self_deaf || server_deaf)
+        .build()
 }
 
 fn subscribe_for_channel(stream: &mut UnixStream, channel_id: &str, nonce: &mut u64) {

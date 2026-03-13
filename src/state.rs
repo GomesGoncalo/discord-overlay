@@ -42,7 +42,6 @@ pub struct ParticipantStateBuilder {
     leaving: bool,
 }
 
-#[allow(dead_code)]
 impl ParticipantStateBuilder {
     /// Create a new builder from a discord participant.
     pub fn from_discord(p: &discord::Participant) -> Self {
