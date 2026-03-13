@@ -195,7 +195,10 @@ fn main() {
                         app.idle_alpha = (app.idle_alpha - speed).max(target_alpha);
                     }
                     needs_redraw = true;
-                    debug!("TIMER: Animating idle_alpha toward {:.2}, now {:.2}", target_alpha, app.idle_alpha);
+                    debug!(
+                        "TIMER: Animating idle_alpha toward {:.2}, now {:.2}",
+                        target_alpha, app.idle_alpha
+                    );
                 }
 
                 // When fully hidden, clear the input region so no mouse events are consumed
