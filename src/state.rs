@@ -272,6 +272,7 @@ impl App {
         self.layer.set_input_region(Some(region.wl_region()));
 
         self.egl.swap();
+        self.layer.wl_surface().commit();
     }
 
     /// Remove all input regions so the overlay is fully click-through (used when hidden).
@@ -886,6 +887,7 @@ impl App {
         }
 
         self.egl.swap();
+        self.layer.wl_surface().commit();
     }
 }
 
