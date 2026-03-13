@@ -12,7 +12,6 @@ use sctk::shell::wlr_layer::{Anchor, LayerSurface};
 use sctk::shell::WaylandSurface;
 use smithay_client_toolkit as sctk;
 
-
 use crate::config::Config;
 use crate::discord;
 use crate::handlers::{button2_rects, button_rects, drag_handle_rects};
@@ -43,6 +42,7 @@ pub struct ParticipantStateBuilder {
     leaving: bool,
 }
 
+#[allow(dead_code)]
 impl ParticipantStateBuilder {
     /// Create a new builder from a discord participant.
     pub fn from_discord(p: &discord::Participant) -> Self {
@@ -299,7 +299,8 @@ impl App {
             .map(|c| c.to_uppercase().to_string())
             .unwrap_or_else(|| "?".to_string());
         if let Some((tex, w, h)) = self.render_text_tex(&initial, 20.0) {
-            self.initials_textures.insert(user_id.to_string(), (tex, w, h));
+            self.initials_textures
+                .insert(user_id.to_string(), (tex, w, h));
         }
     }
 
@@ -393,7 +394,7 @@ impl App {
                 self.participants.push(
                     ParticipantStateBuilder::from_discord(&p)
                         .anim(0.0) // start invisible, animate in
-                        .build()
+                        .build(),
                 );
                 self.make_name_texture(&uid, &name);
                 self.ensure_initial_texture(&uid, &name);
@@ -506,7 +507,8 @@ impl App {
         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
         let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
 
-        self.egl.viewport(0, 0, self.width as i32, self.height as i32);
+        self.egl
+            .viewport(0, 0, self.width as i32, self.height as i32);
         self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
         self.egl.clear(glow::COLOR_BUFFER_BIT);
         self.egl.use_main_program();
@@ -753,11 +755,15 @@ impl App {
                 );
                 // Initial letter centered on placeholder circle
                 self.ensure_initial_texture(user_id, display_name);
-                let initial_data = self.initials_textures.get(user_id).map(|&(t, w, h)| (t, w, h));
+                let initial_data = self
+                    .initials_textures
+                    .get(user_id)
+                    .map(|&(t, w, h)| (t, w, h));
                 if let Some((tex, tw, th)) = initial_data {
                     let ix = av_x + (av_size - tw as f32) * 0.5;
                     let iy = av_y + (av_size - th as f32) * 0.5;
-                    self.egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, row_anim_op);
+                    self.egl
+                        .draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, row_anim_op);
                 }
             }
 
@@ -944,22 +950,55 @@ pub(crate) fn draw_compact_core(
         let y = pad;
         let slot_op = op * p.anim;
 
-        let speaking = p.speaking_until.map(|t| t > std::time::Instant::now()).unwrap_or(false);
+        let speaking = p
+            .speaking_until
+            .map(|t| t > std::time::Instant::now())
+            .unwrap_or(false);
         if speaking {
             let [sr, sg, sb] = speaking_color;
-            egl.draw_rect((x - 2) as f32, (y - 2) as f32, (avatar_size + 4) as f32, (avatar_size + 4) as f32, sw, sh, [sr, sg, sb, slot_op], (avatar_size as f32 / 2.0) + 2.0);
+            egl.draw_rect(
+                (x - 2) as f32,
+                (y - 2) as f32,
+                (avatar_size + 4) as f32,
+                (avatar_size + 4) as f32,
+                sw,
+                sh,
+                [sr, sg, sb, slot_op],
+                (avatar_size as f32 / 2.0) + 2.0,
+            );
         }
 
         let desaturate = if p.deafened { 1.0_f32 } else { 0.0 };
         if let Some(&tex) = avatar_textures.get(&p.user_id) {
-            egl.draw_avatar(x as f32, y as f32, avatar_size as f32, sw, sh, tex, slot_op, desaturate);
+            egl.draw_avatar(
+                x as f32,
+                y as f32,
+                avatar_size as f32,
+                sw,
+                sh,
+                tex,
+                slot_op,
+                desaturate,
+            );
         } else {
             // Placeholder circle with a colour derived from the user ID
-            let hash = p.user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
+            let hash = p
+                .user_id
+                .bytes()
+                .fold(0u32, |a, b| a.wrapping_add(b as u32));
             let r = ((hash & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
             let g = (((hash >> 8) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
             let b = (((hash >> 16) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
-            egl.draw_rect(x as f32, y as f32, avatar_size as f32, avatar_size as f32, sw, sh, [r, g, b, slot_op], avatar_size as f32 / 2.0);
+            egl.draw_rect(
+                x as f32,
+                y as f32,
+                avatar_size as f32,
+                avatar_size as f32,
+                sw,
+                sh,
+                [r, g, b, slot_op],
+                avatar_size as f32 / 2.0,
+            );
             if let Some(&(tex, tw, th)) = initials_textures.get(&p.user_id) {
                 let ix = x as f32 + (avatar_size as f32 - tw as f32) * 0.5;
                 let iy = y as f32 + (avatar_size as f32 - th as f32) * 0.5;
@@ -967,7 +1006,6 @@ pub(crate) fn draw_compact_core(
             }
         }
     }
-
 }
 
 // Helper functions added for testing
@@ -977,14 +1015,22 @@ pub(crate) fn visible_row_count_len(participants_len: usize, max_visible_rows: u
 }
 #[cfg(test)]
 pub(crate) fn compute_compact_dimensions(participants_len: usize) -> (u32, u32) {
-    let n = if participants_len == 0 { 1 } else { participants_len };
+    let n = if participants_len == 0 {
+        1
+    } else {
+        participants_len
+    };
     let w = ((n as u32) * 48 + 16).max(120);
     (w, 48)
 }
 #[cfg(test)]
 pub(crate) fn compute_normal_height(participants_len: usize, max_visible_rows: usize) -> u32 {
     let n = participants_len.min(max_visible_rows);
-    let extra = if participants_len > max_visible_rows { 20 } else { 0 };
+    let extra = if participants_len > max_visible_rows {
+        20
+    } else {
+        0
+    };
     64 + n as u32 * 48 + extra
 }
 #[cfg(test)]
@@ -1079,7 +1125,17 @@ mod tests_state_helpers {
             leaving: false,
         };
         // Should not panic
-        draw_compact_core(&egl, 120, 48, 1.0, 1.0, &[p], &avatar_textures, &initials_textures, [0.2, 0.6, 0.2]);
+        draw_compact_core(
+            &egl,
+            120,
+            48,
+            1.0,
+            1.0,
+            &[p],
+            &avatar_textures,
+            &initials_textures,
+            [0.2, 0.6, 0.2],
+        );
     }
 
     #[test]
@@ -1088,7 +1144,8 @@ mod tests_state_helpers {
         use std::collections::HashMap;
         let egl = MockEgl::new();
         let avatar_textures: HashMap<String, glow::NativeTexture> = HashMap::new();
-        let mut initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let mut initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> =
+            HashMap::new();
         let tex = egl.upload_texture_wh(&[255u8; 4], 4, 4);
         initials_textures.insert("u2".to_string(), (tex, 8, 8));
         let p = ParticipantState {
@@ -1096,12 +1153,24 @@ mod tests_state_helpers {
             display_name: "Bob".to_string(),
             muted: false,
             deafened: false,
-            speaking_until: Some(std::time::Instant::now() + std::time::Duration::from_millis(1500)),
+            speaking_until: Some(
+                std::time::Instant::now() + std::time::Duration::from_millis(1500),
+            ),
             anim: 1.0,
             leaving: false,
         };
         // Should not panic and should exercise speaking + initials path
-        draw_compact_core(&egl, 160, 48, 0.8, 1.0, &[p], &avatar_textures, &initials_textures, [1.0, 0.3, 0.2]);
+        draw_compact_core(
+            &egl,
+            160,
+            48,
+            0.8,
+            1.0,
+            &[p],
+            &avatar_textures,
+            &initials_textures,
+            [1.0, 0.3, 0.2],
+        );
     }
 }
 

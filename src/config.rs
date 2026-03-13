@@ -134,7 +134,12 @@ compact_by_default = false
                 if let Some(parent) = path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                match std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&path)
+                {
                     Ok(mut f) => {
                         use std::io::Write;
                         if let Err(e2) = f.write_all(content.as_bytes()) {
@@ -169,9 +174,9 @@ fn dirs_config_path() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
     use std::fs;
-    use serial_test::serial;
 
     #[test]
     fn default_values() {
@@ -186,11 +191,14 @@ mod tests {
     #[serial]
     fn write_default_and_load() {
         let tid = format!("{:?}", std::thread::current().id());
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
+        let tmp =
+            std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
         let _ = fs::remove_dir_all(&tmp);
         std::env::set_var("XDG_CONFIG_HOME", &tmp);
         let cfg_path = config_path();
-        if cfg_path.exists() { let _ = fs::remove_file(&cfg_path); }
+        if cfg_path.exists() {
+            let _ = fs::remove_file(&cfg_path);
+        }
         Config::write_default_if_missing();
         assert!(cfg_path.exists());
         let cfg = Config::load();
@@ -204,7 +212,8 @@ mod tests {
     #[serial]
     fn env_override() {
         let tid = format!("{:?}", std::thread::current().id());
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
+        let tmp =
+            std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
         let _ = fs::remove_dir_all(&tmp);
         std::env::set_var("XDG_CONFIG_HOME", &tmp);
         std::env::set_var("DISCORD_CLIENT_ID", "OVERRIDE_ID");
@@ -219,11 +228,17 @@ mod tests {
     #[serial]
     fn load_with_invalid_toml_returns_default() {
         let tid = format!("{:?}", std::thread::current().id());
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_parse_{}_{}", std::process::id(), tid));
+        let tmp = std::env::temp_dir().join(format!(
+            "hypr_cfg_test_parse_{}_{}",
+            std::process::id(),
+            tid
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::set_var("XDG_CONFIG_HOME", &tmp);
         let cfg_path = config_path();
-        if let Some(parent) = cfg_path.parent() { let _ = std::fs::create_dir_all(parent); }
+        if let Some(parent) = cfg_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         std::fs::write(&cfg_path, "this is not valid toml").unwrap();
         let cfg = Config::load();
         // default opacity is 0.9 in the default implementation
@@ -239,7 +254,11 @@ mod tests {
         // Create a base temp dir and then make a file where the hypr-overlay
         // directory would be, causing create_dir_all to fail for that parent.
         let tid = format!("{:?}", std::thread::current().id());
-        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_block_{}_{}", std::process::id(), tid));
+        let tmp = std::env::temp_dir().join(format!(
+            "hypr_cfg_test_block_{}_{}",
+            std::process::id(),
+            tid
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::set_var("XDG_CONFIG_HOME", &tmp);
         // Ensure base dir exists

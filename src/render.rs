@@ -712,14 +712,14 @@ mod tests {
 
     #[test]
     fn smoothstep_values() {
-        assert_eq!(smoothstep(0.0,1.0,0.0),0.0);
-        assert_eq!(smoothstep(0.0,1.0,1.0),1.0);
-        assert!((smoothstep(0.0,1.0,0.5) - 0.5).abs() < 1e-6);
+        assert_eq!(smoothstep(0.0, 1.0, 0.0), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 1.0), 1.0);
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn sdf_rrect_center_inside() {
-        let d = sdf_rrect(0.0,0.0,0.0,0.0,0.2,0.2,0.05);
+        let d = sdf_rrect(0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.05);
         assert!(d < 0.0);
     }
 
@@ -733,23 +733,23 @@ mod tests {
 
     #[test]
     fn rasterize_alpha_all() {
-        let buf = rasterize(8, |_px,_py| -10.0);
-        assert_eq!(buf.len(), (8*8*4) as usize);
-        for i in 0..(8*8) {
-            assert!(buf[i*4 + 3] >= 250);
+        let buf = rasterize(8, |_px, _py| -10.0);
+        assert_eq!(buf.len(), (8 * 8 * 4) as usize);
+        for i in 0..(8 * 8) {
+            assert!(buf[i * 4 + 3] >= 250);
         }
     }
 
     #[test]
     fn icons_nonempty() {
         let m = icon_mic(16);
-        assert_eq!(m.len(), (16*16*4) as usize);
+        assert_eq!(m.len(), (16 * 16 * 4) as usize);
         assert!(m.iter().any(|b| *b != 0));
         let h = icon_headphone(16);
-        assert_eq!(h.len(), (16*16*4) as usize);
+        assert_eq!(h.len(), (16 * 16 * 4) as usize);
         assert!(h.iter().any(|b| *b != 0));
         let s = icon_strikeout(16);
-        assert_eq!(s.len(), (16*16*4) as usize);
+        assert_eq!(s.len(), (16 * 16 * 4) as usize);
         assert!(s.iter().any(|b| *b != 0));
     }
 
@@ -763,7 +763,6 @@ mod tests {
     }
 }
 
-
 #[cfg(not(test))]
 // Additional helper methods for testability and a mock EGL backend used in #[cfg(test)]
 impl EglContext {
@@ -772,7 +771,9 @@ impl EglContext {
     }
 
     pub fn delete_texture(&self, tex: glow::NativeTexture) {
-        unsafe { self.gl.delete_texture(tex); }
+        unsafe {
+            self.gl.delete_texture(tex);
+        }
     }
 
     pub fn tex_mic(&self) -> glow::NativeTexture {
@@ -788,43 +789,107 @@ impl EglContext {
 
 // Type alias for the Egl backend used by App (real in normal builds, mock in tests)
 
-
 #[cfg(test)]
 pub struct MockEgl {}
 
 #[cfg(test)]
 impl MockEgl {
-    pub fn new() -> Self { MockEgl {} }
+    pub fn new() -> Self {
+        MockEgl {}
+    }
     pub fn resize(&self, _w: i32, _h: i32) {}
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_rect(&self, _px: f32, _py: f32, _pw: f32, _ph: f32, _surf_w: f32, _surf_h: f32, _color: [f32;4], _radius: f32) {}
+    pub fn draw_rect(
+        &self,
+        _px: f32,
+        _py: f32,
+        _pw: f32,
+        _ph: f32,
+        _surf_w: f32,
+        _surf_h: f32,
+        _color: [f32; 4],
+        _radius: f32,
+    ) {
+    }
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_icon(&self, _px: f32, _py: f32, _pw: f32, _ph: f32, _surf_w:f32, _surf_h:f32, _tex: glow::NativeTexture, _opacity: f32) {}
+    pub fn draw_icon(
+        &self,
+        _px: f32,
+        _py: f32,
+        _pw: f32,
+        _ph: f32,
+        _surf_w: f32,
+        _surf_h: f32,
+        _tex: glow::NativeTexture,
+        _opacity: f32,
+    ) {
+    }
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_avatar(&self, _px: f32, _py: f32, _size: f32, _surf_w: f32, _surf_h: f32, _tex: glow::NativeTexture, _opacity: f32, _desaturate: f32) {}
+    pub fn draw_avatar(
+        &self,
+        _px: f32,
+        _py: f32,
+        _size: f32,
+        _surf_w: f32,
+        _surf_h: f32,
+        _tex: glow::NativeTexture,
+        _opacity: f32,
+        _desaturate: f32,
+    ) {
+    }
     pub fn swap(&self) {}
     pub fn delete_texture(&self, _tex: glow::NativeTexture) {}
-    pub fn upload_texture_wh(&self, _pixels: &[u8], _w: u32, _h: u32) -> glow::NativeTexture { std::num::NonZeroU32::new(1).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
-    pub fn tex_mic(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(2).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
-    pub fn tex_headphone(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(3).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
-    pub fn tex_strikeout(&self) -> glow::NativeTexture { std::num::NonZeroU32::new(4).map(|nz| unsafe { std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz) }).unwrap() }
+    pub fn upload_texture_wh(&self, _pixels: &[u8], _w: u32, _h: u32) -> glow::NativeTexture {
+        std::num::NonZeroU32::new(1)
+            .map(|nz| unsafe {
+                std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz)
+            })
+            .unwrap()
+    }
+    pub fn tex_mic(&self) -> glow::NativeTexture {
+        std::num::NonZeroU32::new(2)
+            .map(|nz| unsafe {
+                std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz)
+            })
+            .unwrap()
+    }
+    pub fn tex_headphone(&self) -> glow::NativeTexture {
+        std::num::NonZeroU32::new(3)
+            .map(|nz| unsafe {
+                std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz)
+            })
+            .unwrap()
+    }
+    pub fn tex_strikeout(&self) -> glow::NativeTexture {
+        std::num::NonZeroU32::new(4)
+            .map(|nz| unsafe {
+                std::mem::transmute::<std::num::NonZeroU32, glow::NativeTexture>(nz)
+            })
+            .unwrap()
+    }
 }
-
-
 
 #[cfg(not(test))]
 impl EglContext {
     pub fn viewport(&self, x: i32, y: i32, w: i32, h: i32) {
-        unsafe { self.gl.viewport(x, y, w, h); }
+        unsafe {
+            self.gl.viewport(x, y, w, h);
+        }
     }
     pub fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
-        unsafe { self.gl.clear_color(r, g, b, a); }
+        unsafe {
+            self.gl.clear_color(r, g, b, a);
+        }
     }
     pub fn clear(&self, mask: u32) {
-        unsafe { self.gl.clear(mask); }
+        unsafe {
+            self.gl.clear(mask);
+        }
     }
     pub fn use_main_program(&self) {
-        unsafe { self.gl.use_program(Some(self.program)); }
+        unsafe {
+            self.gl.use_program(Some(self.program));
+        }
     }
 }
 
@@ -836,14 +901,43 @@ impl MockEgl {
     pub fn use_main_program(&self) {}
 }
 
-
 // Trait and impls to allow using Box<dyn EglBackend> for production and tests.
 #[allow(clippy::too_many_arguments)]
 pub trait EglBackend {
     fn resize(&self, width: i32, height: i32);
-    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32);
-    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32);
-    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32);
+    fn draw_rect(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        color: [f32; 4],
+        radius: f32,
+    );
+    fn draw_icon(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+    );
+    fn draw_avatar(
+        &self,
+        px: f32,
+        py: f32,
+        size: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+        desaturate: f32,
+    );
     fn swap(&self);
     fn delete_texture(&self, tex: glow::NativeTexture);
     fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture;
@@ -858,38 +952,154 @@ pub trait EglBackend {
 
 #[cfg(not(test))]
 impl EglBackend for EglContext {
-    fn resize(&self, width: i32, height: i32) { EglContext::resize(self, width, height) }
-    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32) { EglContext::draw_rect(self, px, py, pw, ph, surf_w, surf_h, color, radius) }
-    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32) { EglContext::draw_icon(self, px, py, pw, ph, surf_w, surf_h, tex, opacity) }
-    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32) { EglContext::draw_avatar(self, px, py, size, surf_w, surf_h, tex, opacity, desaturate) }
-    fn swap(&self) { EglContext::swap(self) }
-    fn delete_texture(&self, tex: glow::NativeTexture) { EglContext::delete_texture(self, tex) }
-    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture { EglContext::upload_texture_wh(self, pixels, w, h) }
-    fn tex_mic(&self) -> glow::NativeTexture { EglContext::tex_mic(self) }
-    fn tex_headphone(&self) -> glow::NativeTexture { EglContext::tex_headphone(self) }
-    fn tex_strikeout(&self) -> glow::NativeTexture { EglContext::tex_strikeout(self) }
-    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) { EglContext::viewport(self, x, y, w, h) }
-    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) { EglContext::clear_color(self, r, g, b, a) }
-    fn clear(&self, mask: u32) { EglContext::clear(self, mask) }
-    fn use_main_program(&self) { EglContext::use_main_program(self) }
+    fn resize(&self, width: i32, height: i32) {
+        EglContext::resize(self, width, height)
+    }
+    fn draw_rect(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        color: [f32; 4],
+        radius: f32,
+    ) {
+        EglContext::draw_rect(self, px, py, pw, ph, surf_w, surf_h, color, radius)
+    }
+    fn draw_icon(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+    ) {
+        EglContext::draw_icon(self, px, py, pw, ph, surf_w, surf_h, tex, opacity)
+    }
+    fn draw_avatar(
+        &self,
+        px: f32,
+        py: f32,
+        size: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+        desaturate: f32,
+    ) {
+        EglContext::draw_avatar(self, px, py, size, surf_w, surf_h, tex, opacity, desaturate)
+    }
+    fn swap(&self) {
+        EglContext::swap(self)
+    }
+    fn delete_texture(&self, tex: glow::NativeTexture) {
+        EglContext::delete_texture(self, tex)
+    }
+    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture {
+        EglContext::upload_texture_wh(self, pixels, w, h)
+    }
+    fn tex_mic(&self) -> glow::NativeTexture {
+        EglContext::tex_mic(self)
+    }
+    fn tex_headphone(&self) -> glow::NativeTexture {
+        EglContext::tex_headphone(self)
+    }
+    fn tex_strikeout(&self) -> glow::NativeTexture {
+        EglContext::tex_strikeout(self)
+    }
+    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) {
+        EglContext::viewport(self, x, y, w, h)
+    }
+    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
+        EglContext::clear_color(self, r, g, b, a)
+    }
+    fn clear(&self, mask: u32) {
+        EglContext::clear(self, mask)
+    }
+    fn use_main_program(&self) {
+        EglContext::use_main_program(self)
+    }
 }
 
 #[cfg(test)]
 impl EglBackend for MockEgl {
-    fn resize(&self, _width: i32, _height: i32) { self.resize(_width, _height) }
-    fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32) { self.draw_rect(px, py, pw, ph, surf_w, surf_h, color, radius) }
-    fn draw_icon(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32) { self.draw_icon(px, py, pw, ph, surf_w, surf_h, tex, opacity) }
-    fn draw_avatar(&self, px: f32, py: f32, size: f32, surf_w: f32, surf_h: f32, tex: glow::NativeTexture, opacity: f32, desaturate: f32) { self.draw_avatar(px, py, size, surf_w, surf_h, tex, opacity, desaturate) }
-    fn swap(&self) { self.swap() }
-    fn delete_texture(&self, tex: glow::NativeTexture) { self.delete_texture(tex) }
-    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture { self.upload_texture_wh(pixels, w, h) }
-    fn tex_mic(&self) -> glow::NativeTexture { self.tex_mic() }
-    fn tex_headphone(&self) -> glow::NativeTexture { self.tex_headphone() }
-    fn tex_strikeout(&self) -> glow::NativeTexture { self.tex_strikeout() }
-    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) { self.viewport(x,y,w,h) }
-    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) { self.clear_color(r,g,b,a) }
-    fn clear(&self, mask: u32) { self.clear(mask) }
-    fn use_main_program(&self) { self.use_main_program() }
+    fn resize(&self, _width: i32, _height: i32) {
+        self.resize(_width, _height)
+    }
+    fn draw_rect(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        color: [f32; 4],
+        radius: f32,
+    ) {
+        self.draw_rect(px, py, pw, ph, surf_w, surf_h, color, radius)
+    }
+    fn draw_icon(
+        &self,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+    ) {
+        self.draw_icon(px, py, pw, ph, surf_w, surf_h, tex, opacity)
+    }
+    fn draw_avatar(
+        &self,
+        px: f32,
+        py: f32,
+        size: f32,
+        surf_w: f32,
+        surf_h: f32,
+        tex: glow::NativeTexture,
+        opacity: f32,
+        desaturate: f32,
+    ) {
+        self.draw_avatar(px, py, size, surf_w, surf_h, tex, opacity, desaturate)
+    }
+    fn swap(&self) {
+        self.swap()
+    }
+    fn delete_texture(&self, tex: glow::NativeTexture) {
+        self.delete_texture(tex)
+    }
+    fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture {
+        self.upload_texture_wh(pixels, w, h)
+    }
+    fn tex_mic(&self) -> glow::NativeTexture {
+        self.tex_mic()
+    }
+    fn tex_headphone(&self) -> glow::NativeTexture {
+        self.tex_headphone()
+    }
+    fn tex_strikeout(&self) -> glow::NativeTexture {
+        self.tex_strikeout()
+    }
+    fn viewport(&self, x: i32, y: i32, w: i32, h: i32) {
+        self.viewport(x, y, w, h)
+    }
+    fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
+        self.clear_color(r, g, b, a)
+    }
+    fn clear(&self, mask: u32) {
+        self.clear(mask)
+    }
+    fn use_main_program(&self) {
+        self.use_main_program()
+    }
 }
 
 #[cfg(test)]

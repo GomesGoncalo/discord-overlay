@@ -253,12 +253,12 @@ impl PointerHandler for App {
                                 let out_scale = info.scale_factor;
 
                                 let (top, right, bottom, left) = self.margins;
-                                let surf_scale =
-                                    self.layer
-                                        .wl_surface()
-                                        .data::<SurfaceData>()
-                                        .map(|d| d.scale_factor())
-                                        .unwrap_or(1);
+                                let surf_scale = self
+                                    .layer
+                                    .wl_surface()
+                                    .data::<SurfaceData>()
+                                    .map(|d| d.scale_factor())
+                                    .unwrap_or(1);
                                 let surf_w = self.width as i32 * surf_scale;
                                 let surf_h = self.height as i32 * surf_scale;
 
@@ -399,7 +399,6 @@ delegate_pointer!(App);
 delegate_layer!(App);
 delegate_registry!(App);
 
-
 delegate_keyboard!(App);
 
 impl ProvidesRegistryState for App {
@@ -415,37 +414,37 @@ mod tests {
 
     #[test]
     fn button_rects_basic() {
-        let (x,y,w,h) = button_rects(360,64);
-        assert_eq!(w,64);
-        assert_eq!(h,48);
+        let (x, y, w, h) = button_rects(360, 64);
+        assert_eq!(w, 64);
+        assert_eq!(h, 48);
         assert_eq!(x, 360i32 - w - 8);
         assert_eq!(y, 8);
     }
 
     #[test]
     fn button2_rects_basic() {
-        let (x,_y,w,h) = button2_rects(360,64);
-        assert_eq!(w,64);
-        assert_eq!(h,48);
+        let (x, _y, w, h) = button2_rects(360, 64);
+        assert_eq!(w, 64);
+        assert_eq!(h, 48);
         assert_eq!(x, 360i32 - w - 8 - w - 8);
     }
 
     #[test]
     fn drag_handle() {
-        let (x,y,w,h) = drag_handle_rects(360,64);
-        assert_eq!(x,8);
-        assert_eq!(y,8);
-        assert_eq!(w,24);
+        let (x, y, w, h) = drag_handle_rects(360, 64);
+        assert_eq!(x, 8);
+        assert_eq!(y, 8);
+        assert_eq!(w, 24);
         assert!(h > 0);
     }
 
     #[test]
     fn small_height_button_rects() {
-        let (_x,_y,_w,h) = button_rects(100, 10);
+        let (_x, _y, _w, h) = button_rects(100, 10);
         assert_eq!(h, 1);
-        let (_x2,_y2,_w2,h2) = button2_rects(100, 10);
+        let (_x2, _y2, _w2, h2) = button2_rects(100, 10);
         assert_eq!(h2, 1);
-        let (_hx,_hy,_hw,hh) = drag_handle_rects(100, 10);
+        let (_hx, _hy, _hw, hh) = drag_handle_rects(100, 10);
         assert_eq!(hh, 1);
     }
 }
