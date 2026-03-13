@@ -90,8 +90,12 @@ fn main() {
     loop_handle
         .insert_source(discord_ev_channel, |event, _, app| {
             if let calloop::channel::Event::Msg(ev) = event {
+                debug!("EVENT: Discord event received: {:?}", ev);
                 if app.handle_discord_event(ev) {
+                    debug!("EVENT: handle_discord_event returned true, calling draw()");
                     app.draw();
+                } else {
+                    debug!("EVENT: handle_discord_event returned false, skipping draw()");
                 }
             }
         })
@@ -191,10 +195,12 @@ fn main() {
                         app.idle_alpha = (app.idle_alpha - speed).max(target_alpha);
                     }
                     needs_redraw = true;
+                    debug!("TIMER: Animating idle_alpha toward {:.2}, now {:.2}", target_alpha, app.idle_alpha);
                 }
 
                 // When fully hidden, clear the input region so no mouse events are consumed
                 if !app.in_channel && app.idle_alpha <= 0.005 && app.idle_alpha > -0.001 {
+                    debug!("TIMER: Clearing input region (fully hidden)");
                     app.clear_input_region();
                 }
 
@@ -221,7 +227,10 @@ fn main() {
                 }
 
                 if needs_redraw {
+                    debug!("TIMER: needs_redraw=true, calling draw()");
                     app.draw();
+                } else {
+                    debug!("TIMER: no redraw needed");
                 }
 
                 // Run at 16ms when animating, 500ms when idle or just tracking timer

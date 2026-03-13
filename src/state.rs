@@ -242,6 +242,10 @@ impl App {
 
     /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
     fn draw_compact(&mut self) {
+        let op = self.opacity * self.idle_alpha;
+        debug!("DRAW_COMPACT: in_channel={} idle_alpha={:.2} opacity={:.2} final_op={:.2}", 
+            self.in_channel, self.idle_alpha, self.opacity, op);
+        
         // Ensure initials exist for missing avatars (simplifies the core draw path)
         let missing_initials: Vec<(String, String)> = self
             .participants
@@ -271,9 +275,13 @@ impl App {
         region.add(0, 0, self.width as i32, self.height as i32);
         self.layer.set_input_region(Some(region.wl_region()));
 
+        debug!("DRAW_COMPACT: Calling egl.swap()");
         self.egl.swap();
+        debug!("DRAW_COMPACT: Calling damage() damage_rect=(0,0,{},{})", self.width as i32, self.height as i32);
         self.layer.wl_surface().damage(0, 0, self.width as i32, self.height as i32);
+        debug!("DRAW_COMPACT: Calling wl_surface().commit()");
         self.layer.wl_surface().commit();
+        debug!("DRAW_COMPACT: Complete");
     }
 
     /// Remove all input regions so the overlay is fully click-through (used when hidden).
@@ -502,11 +510,17 @@ impl App {
     }
 
     pub fn draw(&mut self) {
+        let op = self.opacity * self.idle_alpha;
+        debug!("DRAW: in_channel={} idle_alpha={:.2} opacity={:.2} final_op={:.2} compact={}", 
+            self.in_channel, self.idle_alpha, self.opacity, op, self.compact);
+        
         if self.compact {
+            debug!("DRAW: Using compact mode");
             self.draw_compact();
             return;
         }
-        let op = self.opacity * self.idle_alpha;
+        
+        debug!("DRAW: Using normal mode, w={} h={}", self.width, self.height);
         let (sw, sh) = (self.width as f32, self.height as f32);
         let (bx, by, bw, bh) = button_rects(self.width, 64);
         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
@@ -888,9 +902,13 @@ impl App {
             }
         }
 
+        debug!("DRAW: Calling egl.swap()");
         self.egl.swap();
+        debug!("DRAW: Calling damage() damage_rect=(0,0,{},{})", self.width as i32, self.height as i32);
         self.layer.wl_surface().damage(0, 0, self.width as i32, self.height as i32);
+        debug!("DRAW: Calling wl_surface().commit()");
         self.layer.wl_surface().commit();
+        debug!("DRAW: Complete");
     }
 }
 
