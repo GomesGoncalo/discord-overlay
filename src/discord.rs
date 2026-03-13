@@ -92,6 +92,350 @@ pub fn spawn(
     std::thread::spawn(move || run_client(config, tx, cmd_rx));
 }
 
+// ─── Participant Builder (Builder Pattern) ────────────────────────────────────
+
+pub struct ParticipantBuilder {
+    user_id: String,
+    username: String,
+    nick: Option<String>,
+    avatar_hash: Option<String>,
+    muted: bool,
+    deafened: bool,
+}
+
+impl ParticipantBuilder {
+    pub fn new(user_id: impl Into<String>, username: impl Into<String>) -> Self {
+        Self {
+            user_id: user_id.into(),
+            username: username.into(),
+            nick: None,
+            avatar_hash: None,
+            muted: false,
+            deafened: false,
+        }
+    }
+
+    pub fn nick(mut self, nick: Option<String>) -> Self {
+        self.nick = nick;
+        self
+    }
+
+    pub fn avatar_hash(mut self, hash: Option<String>) -> Self {
+        self.avatar_hash = hash;
+        self
+    }
+
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
+    }
+
+    pub fn deafened(mut self, deafened: bool) -> Self {
+        self.deafened = deafened;
+        self
+    }
+
+    pub fn build(self) -> Participant {
+        Participant {
+            user_id: self.user_id,
+            username: self.username,
+            nick: self.nick,
+            avatar_hash: self.avatar_hash.filter(|h| !h.is_empty()),
+            muted: self.muted,
+            deafened: self.deafened,
+        }
+    }
+}
+
+// ─── Event Handler Strategy (Strategy Pattern) ────────────────────────────────
+
+pub type FrameProcessResult = (
+    Vec<DiscordEvent>,
+    Vec<(String, String)>,
+    Option<String>,
+    Option<String>,
+);
+
+trait EventHandler {
+    fn matches(&self, v: &Value) -> bool;
+    fn handle(
+        &self,
+        v: &Value,
+        local_user_id: &str,
+        local_username: &str,
+        local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult>;
+}
+
+struct GetGuildHandler;
+impl EventHandler for GetGuildHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["cmd"].as_str().unwrap_or("") == "GET_GUILD" && v["nonce"].as_str().unwrap_or("") == "get_guild"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        if let Some(name) = v["data"]["name"].as_str() {
+            let events = vec![DiscordEvent::GuildName {
+                name: name.to_string(),
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+        None
+    }
+}
+
+struct VoiceChannelSelectHandler;
+impl EventHandler for VoiceChannelSelectHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["cmd"].as_str().unwrap_or("") == "GET_SELECTED_VOICE_CHANNEL" && v["nonce"].as_str().unwrap_or("") == "gvsc"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        local_user_id: &str,
+        local_username: &str,
+        local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        if !v["data"].is_null() {
+            let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
+            let subscribe_channel = if !cid.is_empty() { Some(cid) } else { None };
+            
+            let others = parse_participants(&v["data"]);
+            let self_nick = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .and_then(|p| p.nick.clone());
+            let self_avatar = local_avatar.cloned().or_else(|| {
+                others
+                    .iter()
+                    .find(|p| p.user_id == local_user_id)
+                    .and_then(|p| p.avatar_hash.clone())
+            });
+            let self_muted = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .map(|p| p.muted)
+                .unwrap_or(false);
+            let self_deafened = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .map(|p| p.deafened)
+                .unwrap_or(false);
+            
+            let mut parts = vec![ParticipantBuilder::new(local_user_id, local_username)
+                .nick(self_nick)
+                .avatar_hash(self_avatar.clone())
+                .muted(self_muted)
+                .deafened(self_deafened)
+                .build()];
+            parts.extend(others.into_iter().filter(|p| p.user_id != local_user_id));
+            
+            let channel_name = v["data"]["name"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            
+            let mut avatars = Vec::new();
+            for p in &parts {
+                if let Some(hash) = &p.avatar_hash {
+                    avatars.push((p.user_id.clone(), hash.clone()));
+                }
+            }
+            
+            let guild_id = v["data"]["guild_id"].as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            
+            let events = vec![DiscordEvent::VoiceParticipants {
+                participants: parts,
+                channel_name,
+            }];
+            
+            return Some((events, avatars, subscribe_channel, guild_id));
+        } else {
+            let events = vec![DiscordEvent::VoiceParticipants {
+                participants: vec![],
+                channel_name: None,
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+    }
+}
+
+struct SpeakingStartHandler;
+impl EventHandler for SpeakingStartHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "SPEAKING_START"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        if let Some(uid) = v["data"]["user_id"].as_str() {
+            let events = vec![DiscordEvent::SpeakingUpdate {
+                user_id: uid.to_string(),
+                speaking: true,
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+        None
+    }
+}
+
+struct SpeakingEndHandler;
+impl EventHandler for SpeakingEndHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "SPEAKING_END"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        if let Some(uid) = v["data"]["user_id"].as_str() {
+            let events = vec![DiscordEvent::SpeakingUpdate {
+                user_id: uid.to_string(),
+                speaking: false,
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+        None
+    }
+}
+
+struct VoiceStateUpdateHandler;
+impl EventHandler for VoiceStateUpdateHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_UPDATE"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        let p = parse_voice_state(&v["data"]);
+        if !p.user_id.is_empty() {
+            let events = vec![DiscordEvent::ParticipantStateUpdate {
+                user_id: p.user_id,
+                muted: p.muted,
+                deafened: p.deafened,
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+        None
+    }
+}
+
+struct VoiceStateCreateHandler;
+impl EventHandler for VoiceStateCreateHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_CREATE"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        let p = parse_voice_state(&v["data"]);
+        if !p.user_id.is_empty() {
+            let mut avatars = Vec::new();
+            if let Some(hash) = &p.avatar_hash {
+                avatars.push((p.user_id.clone(), hash.clone()));
+            }
+            let events = vec![DiscordEvent::UserJoined(p)];
+            return Some((events, avatars, None, None));
+        }
+        None
+    }
+}
+
+struct VoiceStateDeleteHandler;
+impl EventHandler for VoiceStateDeleteHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_DELETE"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        if let Some(uid) = v["data"]["user"]["id"].as_str() {
+            let events = vec![DiscordEvent::UserLeft {
+                user_id: uid.to_string(),
+            }];
+            return Some((events, Vec::new(), None, None));
+        }
+        None
+    }
+}
+
+struct VoiceChannelSelectEventHandler;
+impl EventHandler for VoiceChannelSelectEventHandler {
+    fn matches(&self, v: &Value) -> bool {
+        v["evt"].as_str().unwrap_or("") == "VOICE_CHANNEL_SELECT"
+    }
+
+    fn handle(
+        &self,
+        v: &Value,
+        _local_user_id: &str,
+        _local_username: &str,
+        _local_avatar: Option<&String>,
+    ) -> Option<FrameProcessResult> {
+        let cid = v["data"]["channel_id"].as_str().unwrap_or("");
+        if !cid.is_empty() {
+            return Some((Vec::new(), Vec::new(), Some(cid.to_string()), None));
+        } else {
+            let events = vec![
+                DiscordEvent::GuildName {
+                    name: String::new(),
+                },
+                DiscordEvent::VoiceParticipants {
+                    participants: vec![],
+                    channel_name: None,
+                },
+            ];
+            return Some((events, Vec::new(), None, None));
+        }
+    }
+}
+
+fn get_event_handlers() -> Vec<Box<dyn EventHandler>> {
+    vec![
+        Box::new(GetGuildHandler),
+        Box::new(VoiceChannelSelectHandler),
+        Box::new(SpeakingStartHandler),
+        Box::new(SpeakingEndHandler),
+        Box::new(VoiceStateUpdateHandler),
+        Box::new(VoiceStateCreateHandler),
+        Box::new(VoiceStateDeleteHandler),
+        Box::new(VoiceChannelSelectEventHandler),
+    ]
+}
+
 // ─── Socket location ──────────────────────────────────────────────────────────
 
 fn get_uid() -> u32 {
@@ -358,20 +702,16 @@ fn parse_voice_state(vs: &serde_json::Value) -> Participant {
     let server_mute =
         vs["mute"].as_bool().unwrap_or(false) || vs_inner["mute"].as_bool().unwrap_or(false);
     let server_deaf = vs_inner["deaf"].as_bool().unwrap_or(false);
-    Participant {
-        user_id: user["id"].as_str().unwrap_or("").to_string(),
-        username: user["username"].as_str().unwrap_or("?").to_string(),
-        nick: vs["nick"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string()),
-        avatar_hash: user["avatar"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string()),
-        muted: self_mute || server_mute,
-        deafened: self_deaf || server_deaf,
-    }
+    
+    ParticipantBuilder::new(
+        user["id"].as_str().unwrap_or(""),
+        user["username"].as_str().unwrap_or("?"),
+    )
+    .nick(vs["nick"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string()))
+    .avatar_hash(user["avatar"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string()))
+    .muted(self_mute || server_mute)
+    .deafened(self_deaf || server_deaf)
+    .build()
 }
 
 fn subscribe_for_channel(stream: &mut UnixStream, channel_id: &str, nonce: &mut u64) {
@@ -826,173 +1166,23 @@ fn wait_for_ready(stream: &mut UnixStream) -> Result<Value, ()> {
 }
 
 // Type alias to reduce clippy type_complexity warning
-pub type FrameProcessResult = (
-    Vec<DiscordEvent>,
-    Vec<(String, String)>,
-    Option<String>,
-    Option<String>,
-);
-
 fn process_frame_events(
     v: &Value,
     local_user_id: &str,
     local_username: &str,
     local_avatar: Option<&String>,
 ) -> FrameProcessResult {
-    let mut events = Vec::new();
-    let mut avatars: Vec<(String, String)> = Vec::new();
-    let mut subscribe_channel: Option<String> = None;
-    let mut guild_id: Option<String> = None;
-
-    let cmd = v["cmd"].as_str().unwrap_or("");
-    let evt = v["evt"].as_str().unwrap_or("");
-    let vnonce = v["nonce"].as_str().unwrap_or("");
-
-    // GET_GUILD response
-    if cmd == "GET_GUILD" && vnonce == "get_guild" {
-        if let Some(name) = v["data"]["name"].as_str() {
-            events.push(DiscordEvent::GuildName {
-                name: name.to_string(),
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    // GET_SELECTED_VOICE_CHANNEL response
-    if cmd == "GET_SELECTED_VOICE_CHANNEL" && vnonce == "gvsc" {
-        if !v["data"].is_null() {
-            let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
-            if !cid.is_empty() {
-                subscribe_channel = Some(cid.clone());
+    let handlers = get_event_handlers();
+    
+    for handler in handlers {
+        if handler.matches(v) {
+            if let Some(result) = handler.handle(v, local_user_id, local_username, local_avatar) {
+                return result;
             }
-            let others = parse_participants(&v["data"]);
-            let self_nick = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .and_then(|p| p.nick.clone());
-            let self_avatar = local_avatar.cloned().or_else(|| {
-                others
-                    .iter()
-                    .find(|p| p.user_id == local_user_id)
-                    .and_then(|p| p.avatar_hash.clone())
-            });
-            let self_muted = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .map(|p| p.muted)
-                .unwrap_or(false);
-            let self_deafened = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .map(|p| p.deafened)
-                .unwrap_or(false);
-            let mut parts = vec![Participant {
-                user_id: local_user_id.to_string(),
-                username: local_username.to_string(),
-                nick: self_nick,
-                avatar_hash: self_avatar.clone(),
-                muted: self_muted,
-                deafened: self_deafened,
-            }];
-            parts.extend(others.into_iter().filter(|p| p.user_id != local_user_id));
-            let channel_name = v["data"]["name"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string());
-            for p in &parts {
-                if let Some(hash) = &p.avatar_hash {
-                    avatars.push((p.user_id.clone(), hash.clone()));
-                }
-            }
-            if let Some(gid) = v["data"]["guild_id"].as_str() {
-                if !gid.is_empty() {
-                    guild_id = Some(gid.to_string());
-                }
-            }
-            events.push(DiscordEvent::VoiceParticipants {
-                participants: parts,
-                channel_name,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        } else {
-            events.push(DiscordEvent::VoiceParticipants {
-                participants: vec![],
-                channel_name: None,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
         }
     }
-
-    if evt == "VOICE_CHANNEL_SELECT" {
-        let cid = v["data"]["channel_id"].as_str().unwrap_or("");
-        if !cid.is_empty() {
-            // request GET_SELECTED_VOICE_CHANNEL by sending 'gvsc' from caller
-            subscribe_channel = Some(cid.to_string());
-        } else {
-            events.push(DiscordEvent::GuildName {
-                name: String::new(),
-            });
-            events.push(DiscordEvent::VoiceParticipants {
-                participants: vec![],
-                channel_name: None,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    if evt == "SPEAKING_START" {
-        if let Some(uid) = v["data"]["user_id"].as_str() {
-            events.push(DiscordEvent::SpeakingUpdate {
-                user_id: uid.to_string(),
-                speaking: true,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    if evt == "SPEAKING_END" {
-        if let Some(uid) = v["data"]["user_id"].as_str() {
-            events.push(DiscordEvent::SpeakingUpdate {
-                user_id: uid.to_string(),
-                speaking: false,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    if evt == "VOICE_STATE_UPDATE" {
-        let p = parse_voice_state(&v["data"]);
-        if !p.user_id.is_empty() {
-            events.push(DiscordEvent::ParticipantStateUpdate {
-                user_id: p.user_id,
-                muted: p.muted,
-                deafened: p.deafened,
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    if evt == "VOICE_STATE_CREATE" {
-        let p = parse_voice_state(&v["data"]);
-        if !p.user_id.is_empty() {
-            if let Some(hash) = &p.avatar_hash {
-                avatars.push((p.user_id.clone(), hash.clone()));
-            }
-            events.push(DiscordEvent::UserJoined(p));
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    if evt == "VOICE_STATE_DELETE" {
-        if let Some(uid) = v["data"]["user"]["id"].as_str() {
-            events.push(DiscordEvent::UserLeft {
-                user_id: uid.to_string(),
-            });
-            return (events, avatars, subscribe_channel, guild_id);
-        }
-    }
-
-    (events, avatars, subscribe_channel, guild_id)
+    
+    (Vec::new(), Vec::new(), None, None)
 }
 
 fn dispatch_event(v: &Value, tx: &calloop::channel::Sender<DiscordEvent>) {
