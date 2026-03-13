@@ -83,6 +83,57 @@ pub enum DiscordCommand {
     SetDeaf(bool),
 }
 
+// ─── JSON Helper Facade ───────────────────────────────────────────────────────
+
+/// Helper trait for cleaner JSON value extraction.
+/// Reduces repeated `.as_str().unwrap_or("")` and `.as_bool().unwrap_or(false)` patterns.
+trait JsonExt {
+    /// Extract string value, return empty string if missing or not a string.
+    fn get_string(&self, key: &str) -> String;
+    
+    /// Extract string value as Option, returns None if missing or empty.
+    fn get_str_option(&self, key: &str) -> Option<String>;
+    
+    /// Extract boolean value with default.
+    #[allow(dead_code)]
+    fn get_bool(&self, key: &str, default: bool) -> bool;
+    
+    /// Extract value at nested path like ["data"]["name"]
+    #[allow(dead_code)]
+    fn get_nested(&self, path: &[&str]) -> Option<Value>;
+}
+
+impl JsonExt for Value {
+    fn get_string(&self, key: &str) -> String {
+        self[key]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn get_str_option(&self, key: &str) -> Option<String> {
+        self[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    fn get_bool(&self, key: &str, default: bool) -> bool {
+        self[key].as_bool().unwrap_or(default)
+    }
+
+    fn get_nested(&self, path: &[&str]) -> Option<Value> {
+        let mut current = self.clone();
+        for key in path {
+            current = current[key].clone();
+            if current.is_null() {
+                return None;
+            }
+        }
+        Some(current)
+    }
+}
+
 /// Spawn the Discord IPC client in a background thread.
 pub fn spawn(
     config: Config,
@@ -170,8 +221,8 @@ trait EventHandler {
 struct GetGuildHandler;
 impl EventHandler for GetGuildHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["cmd"].as_str().unwrap_or("") == "GET_GUILD"
-            && v["nonce"].as_str().unwrap_or("") == "get_guild"
+        v.get_string("cmd") == "GET_GUILD"
+            && v.get_string("nonce") == "get_guild"
     }
 
     fn handle(
@@ -181,10 +232,8 @@ impl EventHandler for GetGuildHandler {
         _local_username: &str,
         _local_avatar: Option<&String>,
     ) -> Option<FrameProcessResult> {
-        if let Some(name) = v["data"]["name"].as_str() {
-            let events = vec![DiscordEvent::GuildName {
-                name: name.to_string(),
-            }];
+        if let Some(name) = v["data"].get_str_option("name") {
+            let events = vec![DiscordEvent::GuildName { name }];
             return Some((events, Vec::new(), None, None));
         }
         None

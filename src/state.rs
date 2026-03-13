@@ -236,6 +236,11 @@ impl App {
         self.margins = (y, 0, 0, x);
     }
 
+    /// Find a participant by user ID (mutable).
+    fn find_participant_mut(&mut self, user_id: &str) -> Option<&mut ParticipantState> {
+        self.participants.iter_mut().find(|p| p.user_id == user_id)
+    }
+
     /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
     fn draw_compact(&mut self) {
         // Ensure initials exist for missing avatars (simplifies the core draw path)
@@ -411,14 +416,12 @@ impl App {
                 true
             }
             discord::DiscordEvent::UserLeft { user_id } => {
-                if let Some(p) = self
-                    .participants
-                    .iter_mut()
-                    .find(|p| p.user_id == user_id && !p.leaving)
-                {
-                    info!("{} leaving channel (animating out)", p.display_name);
-                    p.leaving = true;
-                    return true; // trigger a redraw to start the animation
+                if let Some(p) = self.find_participant_mut(&user_id) {
+                    if !p.leaving {
+                        info!("{} leaving channel (animating out)", p.display_name);
+                        p.leaving = true;
+                        return true; // trigger a redraw to start the animation
+                    }
                 }
                 false
             }
@@ -427,7 +430,7 @@ impl App {
                 muted,
                 deafened,
             } => {
-                if let Some(p) = self.participants.iter_mut().find(|p| p.user_id == user_id) {
+                if let Some(p) = self.find_participant_mut(&user_id) {
                     let changed = p.muted != muted || p.deafened != deafened;
                     p.muted = muted;
                     p.deafened = deafened;
@@ -436,7 +439,7 @@ impl App {
                 false
             }
             discord::DiscordEvent::SpeakingUpdate { user_id, speaking } => {
-                if let Some(p) = self.participants.iter_mut().find(|p| p.user_id == user_id) {
+                if let Some(p) = self.find_participant_mut(&user_id) {
                     p.speaking_until = if speaking {
                         // Ring stays for 1.5s after last SPEAKING_START.
                         // Discord fires SPEAKING_START ~every 1s while active,
