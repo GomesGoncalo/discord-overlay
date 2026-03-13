@@ -232,4 +232,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::remove_var("XDG_CONFIG_HOME");
     }
+
+    #[test]
+    #[serial]
+    fn write_default_parent_blocked() {
+        // Create a base temp dir and then make a file where the hypr-overlay
+        // directory would be, causing create_dir_all to fail for that parent.
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_block_{}_{}", std::process::id(), tid));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        // Ensure base dir exists
+        let _ = std::fs::create_dir_all(&tmp);
+        // Create a file at tmp/hypr-overlay to block directory creation
+        let bad_parent = std::path::Path::new(&tmp).join("hypr-overlay");
+        std::fs::write(&bad_parent, b"not a dir").unwrap();
+
+        // Attempt to write default — should not panic and should not create config.toml
+        Config::write_default_if_missing();
+        let cfg_path = config_path();
+        assert!(!cfg_path.exists());
+
+        // cleanup
+        let _ = std::fs::remove_file(&bad_parent);
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
 }

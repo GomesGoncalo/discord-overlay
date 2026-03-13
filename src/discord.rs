@@ -1324,5 +1324,50 @@ mod tests_extra {
             _ => panic!("expected UserLeft"),
         }
     }
+
+    #[test]
+    fn process_frame_get_guild() {
+        let v = json!({"cmd": "GET_GUILD", "nonce": "get_guild", "data": { "name": "GuildName" }});
+        let (events, avatars, subscribe, guild) = process_frame_events(&v, "", "", None);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DiscordEvent::GuildName { name } => assert_eq!(name, "GuildName"),
+            _ => panic!("expected GuildName"),
+        }
+        assert!(avatars.is_empty());
+        assert!(subscribe.is_none());
+        assert!(guild.is_none());
+    }
+
+    #[test]
+    fn process_frame_voice_channel_select_empty() {
+        let v = json!({"evt": "VOICE_CHANNEL_SELECT", "data": { "channel_id": "" }});
+        let (events, avatars, subscribe, guild) = process_frame_events(&v, "local", "me", None);
+        assert!(subscribe.is_none());
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            DiscordEvent::GuildName { name } => assert_eq!(name, ""),
+            _ => panic!("expected GuildName"),
+        }
+        match &events[1] {
+            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+                assert!(participants.is_empty());
+                assert!(channel_name.is_none());
+            }
+            _ => panic!("expected VoiceParticipants"),
+        }
+        assert!(avatars.is_empty());
+        assert!(guild.is_none());
+    }
+
+    #[test]
+    fn process_frame_voice_channel_select_nonempty() {
+        let v = json!({"evt": "VOICE_CHANNEL_SELECT", "data": { "channel_id": "chanX" }});
+        let (events, avatars, subscribe, guild) = process_frame_events(&v, "", "", None);
+        assert_eq!(subscribe, Some("chanX".to_string()));
+        assert!(events.is_empty());
+        assert!(avatars.is_empty());
+        assert!(guild.is_none());
+    }
 }
 
