@@ -272,6 +272,7 @@ impl App {
         self.layer.set_input_region(Some(region.wl_region()));
 
         self.egl.swap();
+        self.layer.wl_surface().damage(0, 0, self.width as i32, self.height as i32);
         self.layer.wl_surface().commit();
     }
 
@@ -280,6 +281,7 @@ impl App {
         let region = Region::new(&self.compositor).expect("create region");
         // Add nothing — empty region = fully click-through
         self.layer.set_input_region(Some(region.wl_region()));
+        self.layer.wl_surface().damage(0, 0, self.width as i32, self.height as i32);
         self.layer.wl_surface().commit();
     }
 
@@ -887,6 +889,7 @@ impl App {
         }
 
         self.egl.swap();
+        self.layer.wl_surface().damage(0, 0, self.width as i32, self.height as i32);
         self.layer.wl_surface().commit();
     }
 }
