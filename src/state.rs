@@ -168,94 +168,29 @@ impl App {
 
     /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
     fn draw_compact(&mut self) {
-        let op = self.opacity * self.idle_alpha;
-        let sw = self.width as f32;
-        let sh = self.height as f32; // always 48 in compact mode
-        unsafe {
-            self.egl.viewport(0, 0, self.width as i32, self.height as i32);
-            self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
-            self.egl.clear(glow::COLOR_BUFFER_BIT);
-        }
-
-        let avatar_size = 40u32;
-        let pad = 4i32;
-
-        // Collect per-participant data to avoid borrow conflicts during the draw loop.
-        let data: Vec<(f32, bool, Option<std::time::Instant>, String, String)> = self
+        // Ensure initials exist for missing avatars (simplifies the core draw path)
+        let missing_initials: Vec<(String, String)> = self
             .participants
             .iter()
-            .map(|p| {
-                (
-                    p.anim,
-                    p.deafened,
-                    p.speaking_until,
-                    p.user_id.clone(),
-                    p.display_name.clone(),
-                )
-            })
+            .filter(|p| !self.avatar_textures.contains_key(&p.user_id))
+            .map(|p| (p.user_id.clone(), p.display_name.clone()))
             .collect();
-
-        for (i, (anim, deafened, speaking_until, user_id, display_name)) in
-            data.iter().enumerate() {
-            let x = pad + i as i32 * 48;
-            let y = pad;
-            let slot_op = op * anim;
-
-            let speaking = speaking_until
-                .map(|t| t > std::time::Instant::now())
-                .unwrap_or(false);
-            if speaking {
-                let [sr, sg, sb] = self.config.speaking_color;
-                self.egl.draw_rect(
-                    (x - 2) as f32,
-                    (y - 2) as f32,
-                    (avatar_size + 4) as f32,
-                    (avatar_size + 4) as f32,
-                    sw,
-                    sh,
-                    [sr, sg, sb, slot_op],
-                    (avatar_size as f32 / 2.0) + 2.0,
-                );
-            }
-
-            let desaturate = if *deafened { 1.0_f32 } else { 0.0 };
-            if let Some(&tex) = self.avatar_textures.get(user_id) {
-                self.egl.draw_avatar(
-                    x as f32,
-                    y as f32,
-                    avatar_size as f32,
-                    sw,
-                    sh,
-                    tex,
-                    slot_op,
-                    desaturate,
-                );
-            } else {
-                // Placeholder circle with a colour derived from the user ID
-                let hash = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
-                let r = ((hash & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
-                let g = (((hash >> 8) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
-                let b = (((hash >> 16) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
-                self.egl.draw_rect(
-                    x as f32,
-                    y as f32,
-                    avatar_size as f32,
-                    avatar_size as f32,
-                    sw,
-                    sh,
-                    [r, g, b, slot_op],
-                    avatar_size as f32 / 2.0,
-                );
-                // Initial letter centered on placeholder circle
-                self.ensure_initial_texture(user_id, display_name);
-                let initial_data = self.initials_textures.get(user_id).map(|&(t, w, h)| (t, w, h));
-                if let Some((tex, tw, th)) = initial_data {
-                    let ix = x as f32 + (avatar_size as f32 - tw as f32) * 0.5;
-                    let iy = y as f32 + (avatar_size as f32 - th as f32) * 0.5;
-                    self.egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, slot_op);
-                }
-            }
+        for (uid, name) in missing_initials {
+            self.ensure_initial_texture(&uid, &name);
         }
+
+        // Call the extracted core drawing routine (testable without Wayland state)
+        draw_compact_core(
+            &*self.egl,
+            self.width,
+            self.height,
+            self.opacity,
+            self.idle_alpha,
+            &self.participants,
+            &self.avatar_textures,
+            &self.initials_textures,
+            self.config.speaking_color,
+        );
 
         // Entire surface is interactive (acts as drag handle) in compact mode.
         let region = Region::new(&self.compositor).expect("region");
@@ -950,6 +885,62 @@ impl App {
     }
 }
 
+// Core compact-mode drawing routine that depends only on the Egl backend and
+// simple data structures. Extracted so it can be unit-tested without Wayland.
+pub(crate) fn draw_compact_core(
+    egl: &dyn EglBackend,
+    width: u32,
+    height: u32,
+    opacity: f32,
+    idle_alpha: f32,
+    participants: &[ParticipantState],
+    avatar_textures: &HashMap<String, glow::NativeTexture>,
+    initials_textures: &HashMap<String, (glow::NativeTexture, u32, u32)>,
+    speaking_color: [f32; 3],
+) {
+    let op = opacity * idle_alpha;
+    let sw = width as f32;
+    let sh = height as f32;
+    unsafe {
+        egl.viewport(0, 0, width as i32, height as i32);
+        egl.clear_color(0.0, 0.0, 0.0, 0.0);
+        egl.clear(glow::COLOR_BUFFER_BIT);
+    }
+
+    let avatar_size = 40u32;
+    let pad = 4i32;
+
+    for (i, p) in participants.iter().enumerate() {
+        let x = pad + i as i32 * 48;
+        let y = pad;
+        let slot_op = op * p.anim;
+
+        let speaking = p.speaking_until.map(|t| t > std::time::Instant::now()).unwrap_or(false);
+        if speaking {
+            let [sr, sg, sb] = speaking_color;
+            egl.draw_rect((x - 2) as f32, (y - 2) as f32, (avatar_size + 4) as f32, (avatar_size + 4) as f32, sw, sh, [sr, sg, sb, slot_op], (avatar_size as f32 / 2.0) + 2.0);
+        }
+
+        let desaturate = if p.deafened { 1.0_f32 } else { 0.0 };
+        if let Some(&tex) = avatar_textures.get(&p.user_id) {
+            egl.draw_avatar(x as f32, y as f32, avatar_size as f32, sw, sh, tex, slot_op, desaturate);
+        } else {
+            // Placeholder circle with a colour derived from the user ID
+            let hash = p.user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
+            let r = ((hash & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+            let g = (((hash >> 8) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+            let b = (((hash >> 16) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
+            egl.draw_rect(x as f32, y as f32, avatar_size as f32, avatar_size as f32, sw, sh, [r, g, b, slot_op], avatar_size as f32 / 2.0);
+            if let Some(&(tex, tw, th)) = initials_textures.get(&p.user_id) {
+                let ix = x as f32 + (avatar_size as f32 - tw as f32) * 0.5;
+                let iy = y as f32 + (avatar_size as f32 - th as f32) * 0.5;
+                egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, slot_op);
+            }
+        }
+    }
+
+}
+
 // Helper functions added for testing
 pub(crate) fn visible_row_count_len(participants_len: usize, max_visible_rows: usize) -> usize {
     participants_len.min(max_visible_rows)
@@ -1037,5 +1028,49 @@ mod tests_state_helpers {
         assert!(b >= 0.2 && b <= 0.8);
         let idx = placeholder_color_index("user123");
         assert!(idx < 4);
+    }
+
+    #[test]
+    fn draw_compact_core_with_avatar() {
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        let egl = MockEgl::new();
+        let mut avatar_textures: HashMap<String, glow::NativeTexture> = HashMap::new();
+        let initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        avatar_textures.insert("u1".to_string(), tex);
+        let p = ParticipantState {
+            user_id: "u1".to_string(),
+            display_name: "Alice".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+        };
+        // Should not panic
+        draw_compact_core(&egl, 120, 48, 1.0, 1.0, &[p], &avatar_textures, &initials_textures, [0.2, 0.6, 0.2]);
+    }
+
+    #[test]
+    fn draw_compact_core_placeholder_and_speaking() {
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        let egl = MockEgl::new();
+        let avatar_textures: HashMap<String, glow::NativeTexture> = HashMap::new();
+        let mut initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 4, 4);
+        initials_textures.insert("u2".to_string(), (tex, 8, 8));
+        let p = ParticipantState {
+            user_id: "u2".to_string(),
+            display_name: "Bob".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: Some(std::time::Instant::now() + std::time::Duration::from_millis(1500)),
+            anim: 1.0,
+            leaving: false,
+        };
+        // Should not panic and should exercise speaking + initials path
+        draw_compact_core(&egl, 160, 48, 0.8, 1.0, &[p], &avatar_textures, &initials_textures, [1.0, 0.3, 0.2]);
     }
 }
