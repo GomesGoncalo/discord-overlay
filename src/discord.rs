@@ -427,23 +427,23 @@ fn subscribe_for_channel(stream: &mut UnixStream, channel_id: &str, nonce: &mut 
     );
 }
 
+fn avatar_base_url() -> String {
+    std::env::var("HYPR_AVATAR_BASE_URL").unwrap_or_else(|_| "https://cdn.discordapp.com/avatars".to_string())
+}
+
 fn fetch_and_send_avatar(
     user_id: String,
     hash: String,
     tx: calloop::channel::Sender<DiscordEvent>,
 ) {
     std::thread::spawn(move || {
-        let url = format!(
-            "https://cdn.discordapp.com/avatars/{}/{}.png?size=64",
-            user_id, hash
-        );
+        let base = avatar_base_url();
+        let url = format!("{}/{}/{}.png?size=64", base, user_id, hash);
         if let Ok(resp) = ureq::get(&url).call() {
             let mut buf = Vec::new();
             if resp.into_reader().read_to_end(&mut buf).is_ok() {
                 if let Ok(img) = image::load_from_memory(&buf) {
-                    let rgba = image::DynamicImage::from(img.to_rgba8())
-                        .flipv()
-                        .to_rgba8();
+                    let rgba = image::DynamicImage::from(img.to_rgba8()).flipv().to_rgba8();
                     let (w, _h) = rgba.dimensions();
                     let size = w;
                     if size > 0 {
@@ -605,8 +605,17 @@ fn try_connect(
                 let vnonce = v["nonce"].as_str().unwrap_or("");
                 debug!("frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
 
-                let (events, avatars, subscribe_channel, guild_id) = process_frame_events(&v, &local_user_id, &local_username, local_avatar.as_ref());
-                if !events.is_empty() || !avatars.is_empty() || subscribe_channel.is_some() || guild_id.is_some() {
+                let (events, avatars, subscribe_channel, guild_id) = process_frame_events(
+                    &v,
+                    &local_user_id,
+                    &local_username,
+                    local_avatar.as_ref(),
+                );
+                if !events.is_empty()
+                    || !avatars.is_empty()
+                    || subscribe_channel.is_some()
+                    || guild_id.is_some()
+                {
                     for (uid, hash) in avatars {
                         fetch_and_send_avatar(uid, hash, tx.clone());
                     }
@@ -617,11 +626,14 @@ fn try_connect(
                         subscribe_for_channel(&mut stream, &cid, &mut nonce);
                     }
                     if let Some(gid) = guild_id {
-                        send_cmd(&mut stream, json!({
-                            "cmd": "GET_GUILD",
-                            "args": { "guild_id": gid },
-                            "nonce": "get_guild"
-                        }));
+                        send_cmd(
+                            &mut stream,
+                            json!({
+                                "cmd": "GET_GUILD",
+                                "args": { "guild_id": gid },
+                                "nonce": "get_guild"
+                            }),
+                        );
                     }
                     continue;
                 }
@@ -813,11 +825,19 @@ fn wait_for_ready(stream: &mut UnixStream) -> Result<Value, ()> {
 }
 
 // Type alias to reduce clippy type_complexity warning
+pub type FrameProcessResult = (
+    Vec<DiscordEvent>,
+    Vec<(String, String)>,
+    Option<String>,
+    Option<String>,
+);
 
-// Type alias to reduce clippy type_complexity warning
-pub type FrameProcessResult = (Vec<DiscordEvent>, Vec<(String, String)>, Option<String>, Option<String>);
-
-fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, local_avatar: Option<&String>) -> FrameProcessResult {
+fn process_frame_events(
+    v: &Value,
+    local_user_id: &str,
+    local_username: &str,
+    local_avatar: Option<&String>,
+) -> FrameProcessResult {
     let mut events = Vec::new();
     let mut avatars: Vec<(String, String)> = Vec::new();
     let mut subscribe_channel: Option<String> = None;
@@ -830,7 +850,9 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
     // GET_GUILD response
     if cmd == "GET_GUILD" && vnonce == "get_guild" {
         if let Some(name) = v["data"]["name"].as_str() {
-            events.push(DiscordEvent::GuildName { name: name.to_string() });
+            events.push(DiscordEvent::GuildName {
+                name: name.to_string(),
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
@@ -843,12 +865,26 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
                 subscribe_channel = Some(cid.clone());
             }
             let others = parse_participants(&v["data"]);
-            let self_nick = others.iter().find(|p| p.user_id == local_user_id).and_then(|p| p.nick.clone());
+            let self_nick = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .and_then(|p| p.nick.clone());
             let self_avatar = local_avatar.cloned().or_else(|| {
-                others.iter().find(|p| p.user_id == local_user_id).and_then(|p| p.avatar_hash.clone())
+                others
+                    .iter()
+                    .find(|p| p.user_id == local_user_id)
+                    .and_then(|p| p.avatar_hash.clone())
             });
-            let self_muted = others.iter().find(|p| p.user_id == local_user_id).map(|p| p.muted).unwrap_or(false);
-            let self_deafened = others.iter().find(|p| p.user_id == local_user_id).map(|p| p.deafened).unwrap_or(false);
+            let self_muted = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .map(|p| p.muted)
+                .unwrap_or(false);
+            let self_deafened = others
+                .iter()
+                .find(|p| p.user_id == local_user_id)
+                .map(|p| p.deafened)
+                .unwrap_or(false);
             let mut parts = vec![Participant {
                 user_id: local_user_id.to_string(),
                 username: local_username.to_string(),
@@ -858,19 +894,30 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
                 deafened: self_deafened,
             }];
             parts.extend(others.into_iter().filter(|p| p.user_id != local_user_id));
-            let channel_name = v["data"]["name"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let channel_name = v["data"]["name"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             for p in &parts {
                 if let Some(hash) = &p.avatar_hash {
                     avatars.push((p.user_id.clone(), hash.clone()));
                 }
             }
             if let Some(gid) = v["data"]["guild_id"].as_str() {
-                if !gid.is_empty() { guild_id = Some(gid.to_string()); }
+                if !gid.is_empty() {
+                    guild_id = Some(gid.to_string());
+                }
             }
-            events.push(DiscordEvent::VoiceParticipants { participants: parts, channel_name });
+            events.push(DiscordEvent::VoiceParticipants {
+                participants: parts,
+                channel_name,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         } else {
-            events.push(DiscordEvent::VoiceParticipants { participants: vec![], channel_name: None });
+            events.push(DiscordEvent::VoiceParticipants {
+                participants: vec![],
+                channel_name: None,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
@@ -881,22 +928,33 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
             // request GET_SELECTED_VOICE_CHANNEL by sending 'gvsc' from caller
             subscribe_channel = Some(cid.to_string());
         } else {
-            events.push(DiscordEvent::GuildName { name: String::new() });
-            events.push(DiscordEvent::VoiceParticipants { participants: vec![], channel_name: None });
+            events.push(DiscordEvent::GuildName {
+                name: String::new(),
+            });
+            events.push(DiscordEvent::VoiceParticipants {
+                participants: vec![],
+                channel_name: None,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
 
     if evt == "SPEAKING_START" {
         if let Some(uid) = v["data"]["user_id"].as_str() {
-            events.push(DiscordEvent::SpeakingUpdate { user_id: uid.to_string(), speaking: true });
+            events.push(DiscordEvent::SpeakingUpdate {
+                user_id: uid.to_string(),
+                speaking: true,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
 
     if evt == "SPEAKING_END" {
         if let Some(uid) = v["data"]["user_id"].as_str() {
-            events.push(DiscordEvent::SpeakingUpdate { user_id: uid.to_string(), speaking: false });
+            events.push(DiscordEvent::SpeakingUpdate {
+                user_id: uid.to_string(),
+                speaking: false,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
@@ -904,7 +962,11 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
     if evt == "VOICE_STATE_UPDATE" {
         let p = parse_voice_state(&v["data"]);
         if !p.user_id.is_empty() {
-            events.push(DiscordEvent::ParticipantStateUpdate { user_id: p.user_id, muted: p.muted, deafened: p.deafened });
+            events.push(DiscordEvent::ParticipantStateUpdate {
+                user_id: p.user_id,
+                muted: p.muted,
+                deafened: p.deafened,
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
@@ -912,7 +974,9 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
     if evt == "VOICE_STATE_CREATE" {
         let p = parse_voice_state(&v["data"]);
         if !p.user_id.is_empty() {
-            if let Some(hash) = &p.avatar_hash { avatars.push((p.user_id.clone(), hash.clone())); }
+            if let Some(hash) = &p.avatar_hash {
+                avatars.push((p.user_id.clone(), hash.clone()));
+            }
             events.push(DiscordEvent::UserJoined(p));
             return (events, avatars, subscribe_channel, guild_id);
         }
@@ -920,7 +984,9 @@ fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, lo
 
     if evt == "VOICE_STATE_DELETE" {
         if let Some(uid) = v["data"]["user"]["id"].as_str() {
-            events.push(DiscordEvent::UserLeft { user_id: uid.to_string() });
+            events.push(DiscordEvent::UserLeft {
+                user_id: uid.to_string(),
+            });
             return (events, avatars, subscribe_channel, guild_id);
         }
     }
@@ -1111,10 +1177,13 @@ mod tests_extra {
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::os::unix::net::UnixStream;
-    
+
+    use serial_test::serial;
+
     use std::io::{self, Cursor};
 
     #[test]
+    #[serial]
     fn token_path_save_load() {
         let tmp = std::env::temp_dir().join(format!("hypr_token_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -1130,6 +1199,7 @@ mod tests_extra {
     }
 
     #[test]
+    #[serial]
     fn find_socket_uses_runtime_dir() {
         let tmp = std::env::temp_dir().join(format!("hypr_sock_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -1240,7 +1310,10 @@ mod tests_extra {
         let (events, avatars, subscribe, guild) = process_frame_events(&v, "local", "me", None);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+            DiscordEvent::VoiceParticipants {
+                participants,
+                channel_name,
+            } => {
                 assert!(participants.is_empty());
                 assert!(channel_name.is_none());
             }
@@ -1268,7 +1341,10 @@ mod tests_extra {
         assert_eq!(guild, Some("g1".to_string()));
         assert_eq!(avatars.len(), 2);
         match &events[0] {
-            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+            DiscordEvent::VoiceParticipants {
+                participants,
+                channel_name,
+            } => {
                 assert_eq!(participants[0].user_id, "local");
                 assert_eq!(participants.len(), 2);
                 assert_eq!(channel_name.as_deref(), Some("Room"));
@@ -1283,14 +1359,20 @@ mod tests_extra {
         let (events1, _avatars1, _sub1, _g1) = process_frame_events(&v1, "", "", None);
         assert_eq!(events1.len(), 1);
         match &events1[0] {
-            DiscordEvent::SpeakingUpdate { user_id, speaking } => { assert_eq!(user_id, "u1"); assert!( *speaking ); }
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
+                assert_eq!(user_id, "u1");
+                assert!(*speaking);
+            }
             _ => panic!("expected SpeakingUpdate"),
         }
         let v2 = json!({"evt": "SPEAKING_END", "data": { "user_id": "u1" }});
         let (events2, _avatars2, _sub2, _g2) = process_frame_events(&v2, "", "", None);
         assert_eq!(events2.len(), 1);
         match &events2[0] {
-            DiscordEvent::SpeakingUpdate { user_id, speaking } => { assert_eq!(user_id, "u1"); assert!( !*speaking ); }
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
+                assert_eq!(user_id, "u1");
+                assert!(!*speaking);
+            }
             _ => panic!("expected SpeakingUpdate"),
         }
     }
@@ -1301,7 +1383,15 @@ mod tests_extra {
         let (events_up, _a, _s, _g) = process_frame_events(&v_up, "", "", None);
         assert_eq!(events_up.len(), 1);
         match &events_up[0] {
-            DiscordEvent::ParticipantStateUpdate { user_id, muted, deafened } => { assert_eq!(user_id, "u3"); assert!(*muted); assert!(!*deafened); }
+            DiscordEvent::ParticipantStateUpdate {
+                user_id,
+                muted,
+                deafened,
+            } => {
+                assert_eq!(user_id, "u3");
+                assert!(*muted);
+                assert!(!*deafened);
+            }
             _ => panic!("expected ParticipantStateUpdate"),
         }
 
@@ -1309,7 +1399,9 @@ mod tests_extra {
         let (events_c, avatars_c, _s2, _g2) = process_frame_events(&v_create, "", "", None);
         assert_eq!(events_c.len(), 1);
         match &events_c[0] {
-            DiscordEvent::UserJoined(p) => { assert_eq!(p.user_id, "u5"); }
+            DiscordEvent::UserJoined(p) => {
+                assert_eq!(p.user_id, "u5");
+            }
             _ => panic!("expected UserJoined"),
         }
         assert_eq!(avatars_c.len(), 1);
@@ -1320,7 +1412,9 @@ mod tests_extra {
         let (events_d, _a2, _s3, _g3) = process_frame_events(&v_del, "", "", None);
         assert_eq!(events_d.len(), 1);
         match &events_d[0] {
-            DiscordEvent::UserLeft { user_id } => { assert_eq!(user_id, "u4"); }
+            DiscordEvent::UserLeft { user_id } => {
+                assert_eq!(user_id, "u4");
+            }
             _ => panic!("expected UserLeft"),
         }
     }
@@ -1350,7 +1444,10 @@ mod tests_extra {
             _ => panic!("expected GuildName"),
         }
         match &events[1] {
-            DiscordEvent::VoiceParticipants { participants, channel_name } => {
+            DiscordEvent::VoiceParticipants {
+                participants,
+                channel_name,
+            } => {
                 assert!(participants.is_empty());
                 assert!(channel_name.is_none());
             }
@@ -1369,5 +1466,42 @@ mod tests_extra {
         assert!(avatars.is_empty());
         assert!(guild.is_none());
     }
-}
 
+    #[test]
+    fn avatar_base_url_default() {
+        std::env::remove_var("HYPR_AVATAR_BASE_URL");
+        assert_eq!(avatar_base_url(), "https://cdn.discordapp.com/avatars".to_string());
+    }
+
+    #[test]
+    fn avatar_base_url_env_override() {
+        std::env::set_var("HYPR_AVATAR_BASE_URL", "http://localhost:8000/avatars");
+        assert_eq!(avatar_base_url(), "http://localhost:8000/avatars".to_string());
+        std::env::remove_var("HYPR_AVATAR_BASE_URL");
+    }
+
+    #[test]
+    #[serial]
+    fn try_auth_with_cached_token_success() {
+        // Prepare a temporary HOME to control token_path
+        let tmp = std::env::temp_dir().join(format!("hypr_token_test_tryauth_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::set_var("HOME", &tmp);
+        let _ = std::fs::create_dir_all(std::path::Path::new(&tmp).join(".cache/hypr-overlay"));
+        std::fs::write(token_path(), json!({"access_token":"A_TOK","refresh_token":"R_TOK"}).to_string()).unwrap();
+
+        let cfg = Config { client_id: "cid".to_string(), client_secret: "cs".to_string() };
+
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        // Preload the authentication success frame on the peer so authenticate() reads it
+        let auth_ok = json!({"nonce":"auth","cmd":"AUTHENTICATE","data":{}});
+        write_frame(&mut b, OP_FRAME, &auth_ok.to_string()).unwrap();
+
+        let res = try_auth(&cfg, &mut a);
+        assert_eq!(res, Some("A_TOK".to_string()));
+
+        let _ = std::fs::remove_file(token_path());
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::env::remove_var("HOME");
+    }
+}
