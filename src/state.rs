@@ -262,14 +262,10 @@ impl App {
                     self.last_timer_secs = u32::MAX; // force texture regeneration
                 } else if !self.in_channel {
                     self.channel_joined_at = None;
-                    if let Some((tex, _, _)) = self.timer_tex.take() {
-                        self.egl.delete_texture(tex);
-                    }
+                    delete_texture_if_present(&*self.egl, &mut self.timer_tex);
                 }
                 if self.channel_name != channel_name {
-                    if let Some((tex, _, _)) = self.channel_name_tex.take() {
-                        self.egl.delete_texture(tex);
-                    }
+                    delete_texture_if_present(&*self.egl, &mut self.channel_name_tex);
                     self.channel_name = channel_name.clone();
                     if let Some(ref name) = channel_name {
                         if let Some(font) = &self.font {
@@ -310,10 +306,7 @@ impl App {
                 }
                 // Reset scroll when participant list is fully replaced
                 self.scroll_offset = 0;
-                if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    self.egl.delete_texture(tex);
-                    
-                }
+                delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.last_scroll_state = (usize::MAX, usize::MAX);
                 let extra = if self.participants.len() > self.max_visible_rows {
                     20
@@ -410,10 +403,7 @@ impl App {
                 true
             }
             discord::DiscordEvent::GuildName { name } => {
-                if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    self.egl.delete_texture(tex);
-                    
-                }
+                delete_texture_if_present(&*self.egl, &mut self.guild_name_tex);
                 if name.is_empty() {
                     self.guild_name = None;
                 } else {
@@ -426,25 +416,15 @@ impl App {
                 // Clear all voice-channel state so the UI resets to idle.
                 self.in_channel = false;
                 self.channel_name = None;
-                if let Some((tex, _, _)) = self.channel_name_tex.take() {
-                    self.egl.delete_texture(tex);
-                    
-                }
+                delete_texture_if_present(&*self.egl, &mut self.channel_name_tex);
                 // Clear guild name
                 self.guild_name = None;
-                if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    self.egl.delete_texture(tex);
-                }
+                delete_texture_if_present(&*self.egl, &mut self.guild_name_tex);
                 // Clear session timer
                 self.channel_joined_at = None;
-                if let Some((tex, _, _)) = self.timer_tex.take() {
-                    self.egl.delete_texture(tex);
-                }
+                delete_texture_if_present(&*self.egl, &mut self.timer_tex);
                 // Clear scroll indicator
-                if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    self.egl.delete_texture(tex);
-                    
-                }
+                delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.scroll_offset = 0;
                 self.last_scroll_state = (usize::MAX, usize::MAX);
                 for (_, tex) in self.avatar_textures.drain() {
@@ -604,10 +584,7 @@ impl App {
         if self.participants.len() > self.max_visible_rows {
             if scroll_state != self.last_scroll_state {
                 self.last_scroll_state = scroll_state;
-                if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    self.egl.delete_texture(tex);
-                    
-                }
+                delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 let above = self.scroll_offset;
                 let below = self
                     .participants
@@ -625,9 +602,7 @@ impl App {
                 }
             }
         } else if self.scroll_indicator_tex.is_some() {
-            if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                self.egl.delete_texture(tex);
-            }
+            delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
             self.last_scroll_state = (usize::MAX, usize::MAX);
         }
 
@@ -860,6 +835,20 @@ impl App {
 
 // Core compact-mode drawing routine that depends only on the Egl backend and
 // simple data structures. Extracted so it can be unit-tested without Wayland.
+// ─── Helper Functions ────────────────────────────────────────────────────────
+
+/// Delete a texture if it exists (Resource cleanup helper - reduces boilerplate).
+fn delete_texture_if_present(
+    egl: &dyn EglBackend,
+    tex_opt: &mut Option<(glow::NativeTexture, u32, u32)>,
+) {
+    if let Some((tex, _, _)) = tex_opt.take() {
+        egl.delete_texture(tex);
+    }
+}
+
+// ─── Compact Mode Rendering ──────────────────────────────────────────────────
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_compact_core(
     egl: &dyn EglBackend,
