@@ -243,8 +243,8 @@ impl EventHandler for GetGuildHandler {
 struct VoiceChannelSelectHandler;
 impl EventHandler for VoiceChannelSelectHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["cmd"].as_str().unwrap_or("") == "GET_SELECTED_VOICE_CHANNEL"
-            && v["nonce"].as_str().unwrap_or("") == "gvsc"
+        v.get_string("cmd") == "GET_SELECTED_VOICE_CHANNEL"
+            && v.get_string("nonce") == "gvsc"
     }
 
     fn handle(
@@ -255,8 +255,7 @@ impl EventHandler for VoiceChannelSelectHandler {
         local_avatar: Option<&String>,
     ) -> Option<FrameProcessResult> {
         if !v["data"].is_null() {
-            let cid = v["data"]["id"].as_str().unwrap_or("").to_string();
-            let subscribe_channel = if !cid.is_empty() { Some(cid) } else { None };
+            let subscribe_channel = v["data"].get_str_option("id");
 
             let others = parse_participants(&v["data"]);
             let self_nick = others
@@ -324,7 +323,7 @@ impl EventHandler for VoiceChannelSelectHandler {
 struct SpeakingStartHandler;
 impl EventHandler for SpeakingStartHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "SPEAKING_START"
+        v.get_string("evt") == "SPEAKING_START"
     }
 
     fn handle(
@@ -334,9 +333,9 @@ impl EventHandler for SpeakingStartHandler {
         _local_username: &str,
         _local_avatar: Option<&String>,
     ) -> Option<FrameProcessResult> {
-        if let Some(uid) = v["data"]["user_id"].as_str() {
+        if let Some(uid) = v["data"].get_str_option("user_id") {
             let events = vec![DiscordEvent::SpeakingUpdate {
-                user_id: uid.to_string(),
+                user_id: uid,
                 speaking: true,
             }];
             return Some((events, Vec::new(), None, None));
@@ -348,7 +347,7 @@ impl EventHandler for SpeakingStartHandler {
 struct SpeakingEndHandler;
 impl EventHandler for SpeakingEndHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "SPEAKING_END"
+        v.get_string("evt") == "SPEAKING_END"
     }
 
     fn handle(
@@ -358,9 +357,9 @@ impl EventHandler for SpeakingEndHandler {
         _local_username: &str,
         _local_avatar: Option<&String>,
     ) -> Option<FrameProcessResult> {
-        if let Some(uid) = v["data"]["user_id"].as_str() {
+        if let Some(uid) = v["data"].get_str_option("user_id") {
             let events = vec![DiscordEvent::SpeakingUpdate {
-                user_id: uid.to_string(),
+                user_id: uid,
                 speaking: false,
             }];
             return Some((events, Vec::new(), None, None));
@@ -372,7 +371,7 @@ impl EventHandler for SpeakingEndHandler {
 struct VoiceStateUpdateHandler;
 impl EventHandler for VoiceStateUpdateHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_UPDATE"
+        v.get_string("evt") == "VOICE_STATE_UPDATE"
     }
 
     fn handle(
@@ -398,7 +397,7 @@ impl EventHandler for VoiceStateUpdateHandler {
 struct VoiceStateCreateHandler;
 impl EventHandler for VoiceStateCreateHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_CREATE"
+        v.get_string("evt") == "VOICE_STATE_CREATE"
     }
 
     fn handle(
@@ -424,7 +423,7 @@ impl EventHandler for VoiceStateCreateHandler {
 struct VoiceStateDeleteHandler;
 impl EventHandler for VoiceStateDeleteHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "VOICE_STATE_DELETE"
+        v.get_string("evt") == "VOICE_STATE_DELETE"
     }
 
     fn handle(
@@ -447,7 +446,7 @@ impl EventHandler for VoiceStateDeleteHandler {
 struct VoiceChannelSelectEventHandler;
 impl EventHandler for VoiceChannelSelectEventHandler {
     fn matches(&self, v: &Value) -> bool {
-        v["evt"].as_str().unwrap_or("") == "VOICE_CHANNEL_SELECT"
+        v.get_string("evt") == "VOICE_CHANNEL_SELECT"
     }
 
     fn handle(
@@ -457,9 +456,8 @@ impl EventHandler for VoiceChannelSelectEventHandler {
         _local_username: &str,
         _local_avatar: Option<&String>,
     ) -> Option<FrameProcessResult> {
-        let cid = v["data"]["channel_id"].as_str().unwrap_or("");
-        if !cid.is_empty() {
-            Some((Vec::new(), Vec::new(), Some(cid.to_string()), None))
+        if let Some(cid) = v["data"].get_str_option("channel_id") {
+            Some((Vec::new(), Vec::new(), Some(cid), None))
         } else {
             let events = vec![
                 DiscordEvent::GuildName {
