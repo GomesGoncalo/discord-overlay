@@ -26,8 +26,7 @@ use sctk::shell::WaylandSurface;
 use smithay_client_toolkit as sctk;
 
 use config::Config;
-use glow::HasContext;
-use render::{load_system_font, EglContext, EglBackend};
+use render::{load_system_font, EglBackend, EglContext};
 use state::App;
 use tracing::{debug, error, info, warn};
 

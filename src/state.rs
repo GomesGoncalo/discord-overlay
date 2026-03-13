@@ -12,7 +12,6 @@ use sctk::shell::wlr_layer::{Anchor, LayerSurface};
 use sctk::shell::WaylandSurface;
 use smithay_client_toolkit as sctk;
 
-use glow::HasContext;
 
 use crate::config::Config;
 use crate::discord;
@@ -1023,9 +1022,9 @@ mod tests_state_helpers {
         assert_eq!(initial_for_name("bob"), "B".to_string());
         assert_eq!(initial_for_name(""), "?".to_string());
         let (r, g, b) = placeholder_color_from_userid("u1");
-        assert!(r >= 0.2 && r <= 0.8);
-        assert!(g >= 0.2 && g <= 0.8);
-        assert!(b >= 0.2 && b <= 0.8);
+        assert!((0.2..=0.8).contains(&r));
+        assert!((0.2..=0.8).contains(&g));
+        assert!((0.2..=0.8).contains(&b));
         let idx = placeholder_color_index("user123");
         assert!(idx < 4);
     }
