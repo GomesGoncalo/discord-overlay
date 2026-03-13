@@ -263,16 +263,12 @@ impl App {
                 } else if !self.in_channel {
                     self.channel_joined_at = None;
                     if let Some((tex, _, _)) = self.timer_tex.take() {
-                        unsafe {
-                            self.egl.delete_texture(tex);
-                        }
+                        self.egl.delete_texture(tex);
                     }
                 }
                 if self.channel_name != channel_name {
                     if let Some((tex, _, _)) = self.channel_name_tex.take() {
-                        unsafe {
-                            self.egl.delete_texture(tex);
-                        }
+                        self.egl.delete_texture(tex);
                     }
                     self.channel_name = channel_name.clone();
                     if let Some(ref name) = channel_name {
@@ -286,14 +282,10 @@ impl App {
                     }
                 }
                 for (_, (tex, _, _)) in self.name_textures.drain() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 for (_, (tex, _, _)) in self.initials_textures.drain() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 self.participants = parts
                     .iter()
@@ -319,9 +311,8 @@ impl App {
                 // Reset scroll when participant list is fully replaced
                 self.scroll_offset = 0;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 self.last_scroll_state = (usize::MAX, usize::MAX);
                 let extra = if self.participants.len() > self.max_visible_rows {
@@ -420,9 +411,8 @@ impl App {
             }
             discord::DiscordEvent::GuildName { name } => {
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 if name.is_empty() {
                     self.guild_name = None;
@@ -437,46 +427,35 @@ impl App {
                 self.in_channel = false;
                 self.channel_name = None;
                 if let Some((tex, _, _)) = self.channel_name_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 // Clear guild name
                 self.guild_name = None;
                 if let Some((tex, _, _)) = self.guild_name_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 // Clear session timer
                 self.channel_joined_at = None;
                 if let Some((tex, _, _)) = self.timer_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 // Clear scroll indicator
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 self.scroll_offset = 0;
                 self.last_scroll_state = (usize::MAX, usize::MAX);
                 for (_, tex) in self.avatar_textures.drain() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 for (_, (tex, _, _)) in self.name_textures.drain() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 for (_, (tex, _, _)) in self.initials_textures.drain() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
                 }
                 self.participants.clear();
                 self.discord_mute = false;
@@ -499,12 +478,10 @@ impl App {
         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
         let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
 
-        unsafe {
-            self.egl.viewport(0, 0, self.width as i32, self.height as i32);
-            self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
-            self.egl.clear(glow::COLOR_BUFFER_BIT);
-            self.egl.use_main_program();
-        }
+        self.egl.viewport(0, 0, self.width as i32, self.height as i32);
+        self.egl.clear_color(0.0, 0.0, 0.0, 0.0);
+        self.egl.clear(glow::COLOR_BUFFER_BIT);
+        self.egl.use_main_program();
 
         // Drag handle — blue pill
         self.egl.draw_rect(
@@ -628,9 +605,8 @@ impl App {
             if scroll_state != self.last_scroll_state {
                 self.last_scroll_state = scroll_state;
                 if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                    unsafe {
-                        self.egl.delete_texture(tex);
-                    }
+                    self.egl.delete_texture(tex);
+                    
                 }
                 let above = self.scroll_offset;
                 let below = self
@@ -650,9 +626,7 @@ impl App {
             }
         } else if self.scroll_indicator_tex.is_some() {
             if let Some((tex, _, _)) = self.scroll_indicator_tex.take() {
-                unsafe {
-                    self.egl.delete_texture(tex);
-                }
+                self.egl.delete_texture(tex);
             }
             self.last_scroll_state = (usize::MAX, usize::MAX);
         }
@@ -886,6 +860,7 @@ impl App {
 
 // Core compact-mode drawing routine that depends only on the Egl backend and
 // simple data structures. Extracted so it can be unit-tested without Wayland.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_compact_core(
     egl: &dyn EglBackend,
     width: u32,
@@ -900,11 +875,9 @@ pub(crate) fn draw_compact_core(
     let op = opacity * idle_alpha;
     let sw = width as f32;
     let sh = height as f32;
-    unsafe {
-        egl.viewport(0, 0, width as i32, height as i32);
-        egl.clear_color(0.0, 0.0, 0.0, 0.0);
-        egl.clear(glow::COLOR_BUFFER_BIT);
-    }
+    egl.viewport(0, 0, width as i32, height as i32);
+    egl.clear_color(0.0, 0.0, 0.0, 0.0);
+    egl.clear(glow::COLOR_BUFFER_BIT);
 
     let avatar_size = 40u32;
     let pad = 4i32;
@@ -941,22 +914,23 @@ pub(crate) fn draw_compact_core(
 }
 
 // Helper functions added for testing
+#[cfg(test)]
 pub(crate) fn visible_row_count_len(participants_len: usize, max_visible_rows: usize) -> usize {
     participants_len.min(max_visible_rows)
 }
-
+#[cfg(test)]
 pub(crate) fn compute_compact_dimensions(participants_len: usize) -> (u32, u32) {
     let n = if participants_len == 0 { 1 } else { participants_len };
     let w = ((n as u32) * 48 + 16).max(120);
     (w, 48)
 }
-
+#[cfg(test)]
 pub(crate) fn compute_normal_height(participants_len: usize, max_visible_rows: usize) -> u32 {
     let n = participants_len.min(max_visible_rows);
     let extra = if participants_len > max_visible_rows { 20 } else { 0 };
     64 + n as u32 * 48 + extra
 }
-
+#[cfg(test)]
 pub(crate) fn scroll_label(above: usize, below: usize) -> String {
     match (above > 0, below > 0) {
         (true, true) => format!("↑{}  ↓{}", above, below),
@@ -965,14 +939,14 @@ pub(crate) fn scroll_label(above: usize, below: usize) -> String {
         _ => String::new(),
     }
 }
-
+#[cfg(test)]
 pub(crate) fn initial_for_name(name: &str) -> String {
     name.chars()
         .next()
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_else(|| "?".to_string())
 }
-
+#[cfg(test)]
 pub(crate) fn placeholder_color_from_userid(user_id: &str) -> (f32, f32, f32) {
     let hash = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
     let r = ((hash & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
@@ -980,7 +954,7 @@ pub(crate) fn placeholder_color_from_userid(user_id: &str) -> (f32, f32, f32) {
     let b = (((hash >> 16) & 0xFF) as f32) / 255.0 * 0.6 + 0.2;
     (r, g, b)
 }
-
+#[cfg(test)]
 pub(crate) fn placeholder_color_index(user_id: &str) -> usize {
     let hue = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
     (hue % 4) as usize

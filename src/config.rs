@@ -77,7 +77,7 @@ impl Config {
 
     /// Write a default config file if none exists.
     pub fn write_default_if_missing() {
-        let mut path = dirs_config_path();
+        let path = dirs_config_path();
         if path.exists() {
             return;
         }
@@ -128,7 +128,6 @@ compact_by_default = false
         match std::fs::write(&path, content) {
             Ok(_) => {
                 info!("wrote default config to {path:?}");
-                return;
             }
             Err(e) => {
                 error!("could not write default config: {e}, attempting create/open");
@@ -172,6 +171,7 @@ mod tests {
     use super::*;
     use std::env;
     use std::fs;
+    use serial_test::serial;
 
     #[test]
     fn default_values() {
@@ -183,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn write_default_and_load() {
         let tid = format!("{:?}", std::thread::current().id());
         let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
@@ -200,6 +201,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn env_override() {
         let tid = format!("{:?}", std::thread::current().id());
         let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_{}_{}", std::process::id(), tid));
@@ -214,6 +216,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn load_with_invalid_toml_returns_default() {
         let tid = format!("{:?}", std::thread::current().id());
         let tmp = std::env::temp_dir().join(format!("hypr_cfg_test_parse_{}_{}", std::process::id(), tid));

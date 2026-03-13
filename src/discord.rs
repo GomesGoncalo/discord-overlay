@@ -812,7 +812,12 @@ fn wait_for_ready(stream: &mut UnixStream) -> Result<Value, ()> {
     }
 }
 
-fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, local_avatar: Option<&String>) -> (Vec<DiscordEvent>, Vec<(String, String)>, Option<String>, Option<String>) {
+// Type alias to reduce clippy type_complexity warning
+
+// Type alias to reduce clippy type_complexity warning
+pub type FrameProcessResult = (Vec<DiscordEvent>, Vec<(String, String)>, Option<String>, Option<String>);
+
+fn process_frame_events(v: &Value, local_user_id: &str, local_username: &str, local_avatar: Option<&String>) -> FrameProcessResult {
     let mut events = Vec::new();
     let mut avatars: Vec<(String, String)> = Vec::new();
     let mut subscribe_channel: Option<String> = None;
@@ -1106,7 +1111,7 @@ mod tests_extra {
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::os::unix::net::UnixStream;
-    use std::time::SystemTime;
+    
     use std::io::{self, Cursor};
 
     #[test]

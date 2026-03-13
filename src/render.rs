@@ -1,16 +1,25 @@
+#[cfg(not(test))]
 use std::ffi::c_void;
 use tracing::info;
 
+#[cfg(not(test))]
 use glow::HasContext;
+#[cfg(not(test))]
 use khronos_egl as egl;
+#[cfg(not(test))]
 use sctk::reexports::client::protocol::wl_surface::WlSurface;
+#[cfg(not(test))]
 use sctk::reexports::client::Connection;
+#[cfg(not(test))]
 use sctk::reexports::client::Proxy;
+#[cfg(not(test))]
 use smithay_client_toolkit as sctk;
+#[cfg(not(test))]
 use wayland_egl::WlEglSurface;
 
 // ─── GLSL shaders (GLES2 / #version 100) ─────────────────────────────────────
 
+#[cfg(not(test))]
 const VERT_SRC: &str = r"
 attribute vec2 a_position;
 attribute vec2 a_local;
@@ -22,6 +31,7 @@ void main() {
 ";
 
 /// Rounded-rectangle SDF shader used for button backgrounds and the drag handle.
+#[cfg(not(test))]
 const FRAG_SRC: &str = r"
 precision mediump float;
 varying vec2 v_local;
@@ -44,6 +54,7 @@ void main() {
 /// Simple icon overlay shader — samples a white-on-transparent texture and
 /// multiplies by an opacity uniform. Y is flipped because pixel buffers are
 /// top-down but GL textures are bottom-up.
+#[cfg(not(test))]
 const ICON_FRAG_SRC: &str = r"
 precision mediump float;
 varying vec2 v_local;
@@ -56,6 +67,7 @@ void main() {
 ";
 
 /// Avatar shader — clips the quad to a circle using SDF, with optional greyscale desaturation.
+#[cfg(not(test))]
 const AVATAR_FRAG_SRC: &str = r"
 precision mediump float;
 varying vec2 v_local;
@@ -75,6 +87,7 @@ void main() {
 ";
 
 // EGL_PLATFORM_WAYLAND_KHR (0x31D8) — part of EGL_KHR_platform_wayland
+#[cfg(not(test))]
 const EGL_PLATFORM_WAYLAND_KHR: egl::Enum = 0x31D8;
 
 // ─── Procedural icon generation ──────────────────────────────────────────────
@@ -169,6 +182,7 @@ fn icon_strikeout(size: u32) -> Vec<u8> {
 
 // ─── EGL + GL context ────────────────────────────────────────────────────────
 
+#[cfg(not(test))]
 pub struct EglContext {
     egl: egl::DynamicInstance<egl::EGL1_5>,
     egl_display: egl::Display,
@@ -194,7 +208,7 @@ pub struct EglContext {
     avatar_prog: glow::NativeProgram,
     avatar_loc_opacity: glow::UniformLocation,
 }
-
+#[cfg(not(test))]
 impl EglContext {
     pub fn new(conn: &Connection, wl_surface: &WlSurface, width: i32, height: i32) -> Self {
         // Load libEGL.so.1 dynamically and require at least EGL 1.5
@@ -566,6 +580,7 @@ impl EglContext {
 }
 
 /// Upload an RGBA pixel buffer as a GL TEXTURE_2D with linear filtering (non-square).
+#[cfg(not(test))]
 pub unsafe fn upload_texture_wh(
     gl: &glow::Context,
     pixels: &[u8],
@@ -609,6 +624,7 @@ pub unsafe fn upload_texture_wh(
 }
 
 /// Upload a square RGBA pixel buffer.
+#[cfg(not(test))]
 unsafe fn upload_texture(gl: &glow::Context, pixels: &[u8], size: u32) -> glow::NativeTexture {
     upload_texture_wh(gl, pixels, size, size)
 }
@@ -748,6 +764,7 @@ mod tests {
 }
 
 
+#[cfg(not(test))]
 // Additional helper methods for testability and a mock EGL backend used in #[cfg(test)]
 impl EglContext {
     pub fn upload_texture_wh(&self, pixels: &[u8], w: u32, h: u32) -> glow::NativeTexture {
@@ -770,8 +787,7 @@ impl EglContext {
 }
 
 // Type alias for the Egl backend used by App (real in normal builds, mock in tests)
-#[cfg(not(test))]
-pub type Egl = EglContext;
+
 
 #[cfg(test)]
 pub struct MockEgl {}
@@ -795,9 +811,8 @@ impl MockEgl {
 }
 
 
-#[cfg(test)]
-pub type Egl = MockEgl;
 
+#[cfg(not(test))]
 impl EglContext {
     pub fn viewport(&self, x: i32, y: i32, w: i32, h: i32) {
         unsafe { self.gl.viewport(x, y, w, h); }
@@ -823,6 +838,7 @@ impl MockEgl {
 
 
 // Trait and impls to allow using Box<dyn EglBackend> for production and tests.
+#[allow(clippy::too_many_arguments)]
 pub trait EglBackend {
     fn resize(&self, width: i32, height: i32);
     fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32);
@@ -840,6 +856,7 @@ pub trait EglBackend {
     fn use_main_program(&self);
 }
 
+#[cfg(not(test))]
 impl EglBackend for EglContext {
     fn resize(&self, width: i32, height: i32) { EglContext::resize(self, width, height) }
     fn draw_rect(&self, px: f32, py: f32, pw: f32, ph: f32, surf_w: f32, surf_h: f32, color: [f32;4], radius: f32) { EglContext::draw_rect(self, px, py, pw, ph, surf_w, surf_h, color, radius) }

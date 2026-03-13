@@ -441,9 +441,9 @@ mod tests {
 
     #[test]
     fn small_height_button_rects() {
-        let (_x,_y,w,h) = button_rects(100, 10);
+        let (_x,_y,_w,h) = button_rects(100, 10);
         assert_eq!(h, 1);
-        let (_x2,_y2,w2,h2) = button2_rects(100, 10);
+        let (_x2,_y2,_w2,h2) = button2_rects(100, 10);
         assert_eq!(h2, 1);
         let (_hx,_hy,_hw,hh) = drag_handle_rects(100, 10);
         assert_eq!(hh, 1);

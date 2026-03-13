@@ -26,7 +26,9 @@ use sctk::shell::WaylandSurface;
 use smithay_client_toolkit as sctk;
 
 use config::Config;
-use render::{load_system_font, EglBackend, EglContext};
+use render::{load_system_font, EglBackend};
+#[cfg(not(test))]
+use render::EglContext;
 use state::App;
 use tracing::{debug, error, info, warn};
 
@@ -123,19 +125,16 @@ fn main() {
                         debug!("{name} removed from list");
                         app.participants.remove(pos);
                         if let Some((tex, _, _)) = app.name_textures.remove(uid) {
-                            unsafe {
-                                app.egl.delete_texture(tex);
-                            }
+                            app.egl.delete_texture(tex);
+                            
                         }
                         if let Some((tex, _, _)) = app.initials_textures.remove(uid) {
-                            unsafe {
-                                app.egl.delete_texture(tex);
-                            }
+                            app.egl.delete_texture(tex);
+                            
                         }
                         if let Some(tex) = app.avatar_textures.remove(uid) {
-                            unsafe {
-                                app.egl.delete_texture(tex);
-                            }
+                            app.egl.delete_texture(tex);
+                            
                         }
                     }
                 }
@@ -214,9 +213,8 @@ fn main() {
                             format!("{m}:{s:02}")
                         };
                         if let Some((tex, _, _)) = app.timer_tex.take() {
-                            unsafe {
-                                app.egl.delete_texture(tex);
-                            }
+                            app.egl.delete_texture(tex);
+                            
                         }
                         let new_tex = app.render_text_tex(&label, 12.0);
                         app.timer_tex = new_tex;
@@ -378,9 +376,8 @@ fn main() {
                 app.config = new_cfg;
                 for (uid, name) in user_ids.iter().zip(names.iter()) {
                     if let Some((tex, _, _)) = app.name_textures.remove(uid) {
-                        unsafe {
-                            app.egl.delete_texture(tex);
-                        }
+                        app.egl.delete_texture(tex);
+                        
                     }
                     app.make_name_texture(uid, name);
                 }
