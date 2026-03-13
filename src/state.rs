@@ -32,6 +32,77 @@ pub struct ParticipantState {
     pub leaving: bool,
 }
 
+/// Builder for ParticipantState with sensible defaults.
+pub struct ParticipantStateBuilder {
+    user_id: String,
+    display_name: String,
+    muted: bool,
+    deafened: bool,
+    speaking_until: Option<std::time::Instant>,
+    anim: f32,
+    leaving: bool,
+}
+
+impl ParticipantStateBuilder {
+    /// Create a new builder from a discord participant.
+    pub fn from_discord(p: &discord::Participant) -> Self {
+        Self {
+            user_id: p.user_id.clone(),
+            display_name: p.nick.clone().unwrap_or_else(|| p.username.clone()),
+            muted: p.muted,
+            deafened: p.deafened,
+            speaking_until: None,
+            anim: 1.0, // start visible by default
+            leaving: false,
+        }
+    }
+
+    /// Create a new builder with minimal required fields.
+    pub fn new(user_id: impl Into<String>, display_name: impl Into<String>) -> Self {
+        Self {
+            user_id: user_id.into(),
+            display_name: display_name.into(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+        }
+    }
+
+    pub fn anim(mut self, anim: f32) -> Self {
+        self.anim = anim;
+        self
+    }
+
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
+    }
+
+    pub fn deafened(mut self, deafened: bool) -> Self {
+        self.deafened = deafened;
+        self
+    }
+
+    pub fn leaving(mut self, leaving: bool) -> Self {
+        self.leaving = leaving;
+        self
+    }
+
+    pub fn build(self) -> ParticipantState {
+        ParticipantState {
+            user_id: self.user_id,
+            display_name: self.display_name,
+            muted: self.muted,
+            deafened: self.deafened,
+            speaking_until: self.speaking_until,
+            anim: self.anim,
+            leaving: self.leaving,
+        }
+    }
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -281,15 +352,7 @@ impl App {
                 delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
                 self.participants = parts
                     .iter()
-                    .map(|p| ParticipantState {
-                        user_id: p.user_id.clone(),
-                        display_name: p.nick.clone().unwrap_or_else(|| p.username.clone()),
-                        muted: p.muted,
-                        deafened: p.deafened,
-                        speaking_until: None,
-                        anim: 1.0, // already visible on initial load
-                        leaving: false,
-                    })
+                    .map(|p| ParticipantStateBuilder::from_discord(p).build())
                     .collect();
                 let user_names: Vec<(String, String)> = self
                     .participants
@@ -327,15 +390,11 @@ impl App {
                 );
                 let uid = p.user_id.clone();
                 let name = p.nick.clone().unwrap_or_else(|| p.username.clone());
-                self.participants.push(ParticipantState {
-                    user_id: uid.clone(),
-                    display_name: name.clone(),
-                    muted: p.muted,
-                    deafened: p.deafened,
-                    speaking_until: None,
-                    anim: 0.0, // start invisible, animate in
-                    leaving: false,
-                });
+                self.participants.push(
+                    ParticipantStateBuilder::from_discord(&p)
+                        .anim(0.0) // start invisible, animate in
+                        .build()
+                );
                 self.make_name_texture(&uid, &name);
                 self.ensure_initial_texture(&uid, &name);
                 let extra = if self.participants.len() > self.max_visible_rows {
@@ -1097,5 +1156,55 @@ mod tests_discord_events {
         };
         p.leaving = true;
         assert!(p.leaving);
+    }
+
+    #[test]
+    fn participant_state_builder_from_discord() {
+        let discord_p = crate::discord::Participant {
+            user_id: "123".to_string(),
+            username: "alice".to_string(),
+            nick: Some("Alice".to_string()),
+            avatar_hash: Some("abc123".to_string()),
+            muted: true,
+            deafened: false,
+        };
+        let p = ParticipantStateBuilder::from_discord(&discord_p).build();
+        assert_eq!(p.user_id, "123");
+        assert_eq!(p.display_name, "Alice"); // nick takes precedence
+        assert!(p.muted);
+        assert!(!p.deafened);
+        assert_eq!(p.anim, 1.0); // default: visible
+    }
+
+    #[test]
+    fn participant_state_builder_custom_anim() {
+        let discord_p = crate::discord::Participant {
+            user_id: "456".to_string(),
+            username: "bob".to_string(),
+            nick: None,
+            avatar_hash: None,
+            muted: false,
+            deafened: true,
+        };
+        let p = ParticipantStateBuilder::from_discord(&discord_p)
+            .anim(0.0) // starting invisible
+            .leaving(true)
+            .build();
+        assert_eq!(p.display_name, "bob"); // no nick, use username
+        assert_eq!(p.anim, 0.0);
+        assert!(p.leaving);
+    }
+
+    #[test]
+    fn participant_state_builder_direct() {
+        let p = ParticipantStateBuilder::new("789", "Charlie")
+            .muted(true)
+            .deafened(true)
+            .build();
+        assert_eq!(p.user_id, "789");
+        assert_eq!(p.display_name, "Charlie");
+        assert!(p.muted);
+        assert!(p.deafened);
+        assert_eq!(p.anim, 1.0);
     }
 }
