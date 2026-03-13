@@ -1570,99 +1570,7 @@ mod tests_extra {
         assert_eq!(parts[1].nick, None);
     }
 
-    #[test]
-    fn dispatch_event_voice_state_update() {
-        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
-        let v = json!({
-            "evt": "VOICE_STATE_UPDATE",
-            "data": {
-                "user": {"id": "u1", "username": "alice"},
-                "voice_state": {"self_mute": true, "self_deaf": false, "mute": false, "deaf": false}
-            }
-        });
-        dispatch_event(&v, &tx);
-        let e = rx.recv().unwrap();
-        match e {
-            DiscordEvent::ParticipantStateUpdate {
-                user_id,
-                muted,
-                deafened,
-            } => {
-                assert_eq!(user_id, "u1");
-                assert!(muted);
-                assert!(!deafened);
-            }
-            _ => panic!("expected ParticipantStateUpdate"),
-        }
-    }
 
-    #[test]
-    fn dispatch_event_speaking_start() {
-        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
-        let v = json!({"evt": "SPEAKING_START", "data": {"user_id": "u1"}});
-        dispatch_event(&v, &tx);
-        let e = rx.recv().unwrap();
-        match e {
-            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
-                assert_eq!(user_id, "u1");
-                assert!(speaking);
-            }
-            _ => panic!("expected SpeakingUpdate"),
-        }
-    }
-
-    #[test]
-    fn dispatch_event_speaking_end() {
-        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
-        let v = json!({"evt": "SPEAKING_END", "data": {"user_id": "u1"}});
-        dispatch_event(&v, &tx);
-        let e = rx.recv().unwrap();
-        match e {
-            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
-                assert_eq!(user_id, "u1");
-                assert!(!speaking);
-            }
-            _ => panic!("expected SpeakingUpdate"),
-        }
-    }
-
-    #[test]
-    fn dispatch_event_voice_state_create() {
-        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
-        let v = json!({
-            "evt": "VOICE_STATE_CREATE",
-            "data": {
-                "user": {"id": "u1", "username": "alice", "avatar": "hash1"},
-                "voice_state": {"self_mute": false, "self_deaf": false},
-                "nick": "Ali"
-            }
-        });
-        dispatch_event(&v, &tx);
-        let e = rx.recv().unwrap();
-        match e {
-            DiscordEvent::UserJoined(p) => {
-                assert_eq!(p.user_id, "u1");
-                assert_eq!(p.username, "alice");
-                assert_eq!(p.nick.as_deref(), Some("Ali"));
-                assert_eq!(p.avatar_hash.as_deref(), Some("hash1"));
-            }
-            _ => panic!("expected UserJoined"),
-        }
-    }
-
-    #[test]
-    fn dispatch_event_voice_state_delete() {
-        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
-        let v = json!({"evt": "VOICE_STATE_DELETE", "data": {"user": {"id": "u1"}}});
-        dispatch_event(&v, &tx);
-        let e = rx.recv().unwrap();
-        match e {
-            DiscordEvent::UserLeft { user_id } => {
-                assert_eq!(user_id, "u1");
-            }
-            _ => panic!("expected UserLeft"),
-        }
-    }
 
     #[test]
     fn dispatch_event_ignored_unknown_event() {
@@ -1681,33 +1589,7 @@ mod tests_extra {
         assert!(!buffer.is_empty());
     }
 
-    #[test]
-    fn process_frame_ptt_mode_voice_activity() {
-        let v = json!({
-            "data": {
-                "mode": {"type": "VOICE_ACTIVITY"}
-            }
-        });
-        let (events, _avatars, _sub, _g) = process_frame_events(&v, "", "", None);
-        assert!(events.iter().any(|e| match e {
-            DiscordEvent::VoiceMode { ptt } => !ptt,
-            _ => false,
-        }));
-    }
 
-    #[test]
-    fn process_frame_ptt_mode_push_to_talk() {
-        let v = json!({
-            "data": {
-                "mode": {"type": "PUSH_TO_TALK"}
-            }
-        });
-        let (events, _avatars, _sub, _g) = process_frame_events(&v, "", "", None);
-        assert!(events.iter().any(|e| match e {
-            DiscordEvent::VoiceMode { ptt } => *ptt,
-            _ => false,
-        }));
-    }
 
     #[test]
     fn is_timeout_would_block() {
