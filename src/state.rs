@@ -277,12 +277,8 @@ impl App {
                         }
                     }
                 }
-                for (_, (tex, _, _)) in self.name_textures.drain() {
-                    self.egl.delete_texture(tex);
-                }
-                for (_, (tex, _, _)) in self.initials_textures.drain() {
-                    self.egl.delete_texture(tex);
-                }
+                delete_all_textures_in_map(&*self.egl, &mut self.name_textures);
+                delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
                 self.participants = parts
                     .iter()
                     .map(|p| ParticipantState {
@@ -427,16 +423,9 @@ impl App {
                 delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.scroll_offset = 0;
                 self.last_scroll_state = (usize::MAX, usize::MAX);
-                for (_, tex) in self.avatar_textures.drain() {
-                    self.egl.delete_texture(tex);
-                    
-                }
-                for (_, (tex, _, _)) in self.name_textures.drain() {
-                    self.egl.delete_texture(tex);
-                }
-                for (_, (tex, _, _)) in self.initials_textures.drain() {
-                    self.egl.delete_texture(tex);
-                }
+                delete_all_avatar_textures(&*self.egl, &mut self.avatar_textures);
+                delete_all_textures_in_map(&*self.egl, &mut self.name_textures);
+                delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
                 self.participants.clear();
                 self.discord_mute = false;
                 self.discord_deaf = false;
@@ -843,6 +832,26 @@ fn delete_texture_if_present(
     tex_opt: &mut Option<(glow::NativeTexture, u32, u32)>,
 ) {
     if let Some((tex, _, _)) = tex_opt.take() {
+        egl.delete_texture(tex);
+    }
+}
+
+/// Delete all textures in a hashmap (Batch resource cleanup helper).
+fn delete_all_textures_in_map(
+    egl: &dyn EglBackend,
+    textures: &mut HashMap<String, (glow::NativeTexture, u32, u32)>,
+) {
+    for (_, (tex, _, _)) in textures.drain() {
+        egl.delete_texture(tex);
+    }
+}
+
+/// Delete all avatar textures in a hashmap.
+fn delete_all_avatar_textures(
+    egl: &dyn EglBackend,
+    textures: &mut HashMap<String, glow::NativeTexture>,
+) {
+    for (_, tex) in textures.drain() {
         egl.delete_texture(tex);
     }
 }
