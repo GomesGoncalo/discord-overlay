@@ -747,28 +747,19 @@ fn parse_participants(channel_data: &serde_json::Value) -> Vec<Participant> {
 fn parse_voice_state(vs: &serde_json::Value) -> Participant {
     let user = &vs["user"];
     let vs_inner = &vs["voice_state"];
-    let self_mute = vs_inner["self_mute"].as_bool().unwrap_or(false);
-    let self_deaf = vs_inner["self_deaf"].as_bool().unwrap_or(false);
-    let server_mute =
-        vs["mute"].as_bool().unwrap_or(false) || vs_inner["mute"].as_bool().unwrap_or(false);
-    let server_deaf = vs_inner["deaf"].as_bool().unwrap_or(false);
+    let self_mute = vs_inner.get_bool("self_mute", false);
+    let self_deaf = vs_inner.get_bool("self_deaf", false);
+    let server_mute = vs.get_bool("mute", false) || vs_inner.get_bool("mute", false);
+    let server_deaf = vs_inner.get_bool("deaf", false);
+
+    let username = user.get_str_option("username").unwrap_or_else(|| "?".to_string());
 
     ParticipantBuilder::new(
-        user["id"].as_str().unwrap_or(""),
-        user["username"].as_str().unwrap_or("?"),
+        &user.get_string("id"),
+        &username,
     )
-    .nick(
-        vs["nick"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string()),
-    )
-    .avatar_hash(
-        user["avatar"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string()),
-    )
+    .nick(vs.get_str_option("nick"))
+    .avatar_hash(user.get_str_option("avatar"))
     .muted(self_mute || server_mute)
     .deafened(self_deaf || server_deaf)
     .build()
