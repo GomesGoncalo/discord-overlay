@@ -1047,3 +1047,57 @@ mod tests_state_helpers {
         draw_compact_core(&egl, 160, 48, 0.8, 1.0, &[p], &avatar_textures, &initials_textures, [1.0, 0.3, 0.2]);
     }
 }
+
+#[cfg(test)]
+mod tests_discord_events {
+    use super::*;
+
+    #[test]
+    fn participant_state_defaults() {
+        let _p = ParticipantState {
+            user_id: "test".to_string(),
+            display_name: "Test User".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+        };
+        assert!(_p.user_id == "test");
+        assert_eq!(_p.display_name, "Test User");
+        assert!(!_p.muted);
+        assert!(!_p.deafened);
+        assert!(!_p.leaving);
+    }
+
+    #[test]
+    fn participant_with_speaking() {
+        let mut p = ParticipantState {
+            user_id: "test".to_string(),
+            display_name: "Test User".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+        };
+        let now = std::time::Instant::now();
+        p.speaking_until = Some(now);
+        assert!(p.speaking_until.is_some());
+    }
+
+    #[test]
+    fn participant_leaving_animation() {
+        let mut p = ParticipantState {
+            user_id: "test".to_string(),
+            display_name: "Test User".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+        };
+        p.leaving = true;
+        assert!(p.leaving);
+    }
+}

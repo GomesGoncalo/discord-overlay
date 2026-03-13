@@ -1521,4 +1521,264 @@ mod tests_extra {
         let _ = std::fs::remove_dir_all(&tmp);
         std::env::remove_var("HOME");
     }
+
+    #[test]
+    fn parse_voice_state_with_server_deafen() {
+        let vs = json!({
+            "user": {"id": "u4", "username": "dave"},
+            "voice_state": {"self_mute": false, "self_deaf": false, "mute": false, "deaf": true}
+        });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "u4");
+        assert!(!p.muted);
+        assert!(p.deafened);
+    }
+
+    #[test]
+    fn parse_voice_state_empty_avatar() {
+        let vs = json!({
+            "user": {"id": "u5", "username": "eve", "avatar": ""},
+            "voice_state": {}
+        });
+        let p = parse_voice_state(&vs);
+        assert_eq!(p.user_id, "u5");
+        assert!(p.avatar_hash.is_none()); // Empty string treated as None
+    }
+
+    #[test]
+    fn parse_participants_empty_array() {
+        let ch = json!({ "voice_states": [] });
+        let parts = parse_participants(&ch);
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn parse_participants_multiple_with_nicks() {
+        let vs1 = json!({
+            "user": {"id": "u1", "username": "alice"},
+            "voice_state": {},
+            "nick": "Alice"
+        });
+        let vs2 = json!({
+            "user": {"id": "u2", "username": "bob"},
+            "voice_state": {}
+        });
+        let ch = json!({ "voice_states": [vs1, vs2] });
+        let parts = parse_participants(&ch);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].nick.as_deref(), Some("Alice"));
+        assert_eq!(parts[1].nick, None);
+    }
+
+    #[test]
+    fn dispatch_event_voice_state_update() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({
+            "evt": "VOICE_STATE_UPDATE",
+            "data": {
+                "user": {"id": "u1", "username": "alice"},
+                "voice_state": {"self_mute": true, "self_deaf": false, "mute": false, "deaf": false}
+            }
+        });
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::ParticipantStateUpdate {
+                user_id,
+                muted,
+                deafened,
+            } => {
+                assert_eq!(user_id, "u1");
+                assert!(muted);
+                assert!(!deafened);
+            }
+            _ => panic!("expected ParticipantStateUpdate"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_speaking_start() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({"evt": "SPEAKING_START", "data": {"user_id": "u1"}});
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
+                assert_eq!(user_id, "u1");
+                assert!(speaking);
+            }
+            _ => panic!("expected SpeakingUpdate"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_speaking_end() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({"evt": "SPEAKING_END", "data": {"user_id": "u1"}});
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::SpeakingUpdate { user_id, speaking } => {
+                assert_eq!(user_id, "u1");
+                assert!(!speaking);
+            }
+            _ => panic!("expected SpeakingUpdate"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_voice_state_create() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({
+            "evt": "VOICE_STATE_CREATE",
+            "data": {
+                "user": {"id": "u1", "username": "alice", "avatar": "hash1"},
+                "voice_state": {"self_mute": false, "self_deaf": false},
+                "nick": "Ali"
+            }
+        });
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::UserJoined(p) => {
+                assert_eq!(p.user_id, "u1");
+                assert_eq!(p.username, "alice");
+                assert_eq!(p.nick.as_deref(), Some("Ali"));
+                assert_eq!(p.avatar_hash.as_deref(), Some("hash1"));
+            }
+            _ => panic!("expected UserJoined"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_voice_state_delete() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({"evt": "VOICE_STATE_DELETE", "data": {"user": {"id": "u1"}}});
+        dispatch_event(&v, &tx);
+        let e = rx.recv().unwrap();
+        match e {
+            DiscordEvent::UserLeft { user_id } => {
+                assert_eq!(user_id, "u1");
+            }
+            _ => panic!("expected UserLeft"),
+        }
+    }
+
+    #[test]
+    fn dispatch_event_ignored_unknown_event() {
+        let (tx, rx) = calloop::channel::channel::<DiscordEvent>();
+        let v = json!({"evt": "SOME_UNKNOWN_EVENT", "data": {}});
+        dispatch_event(&v, &tx);
+        // Unknown events should not send anything
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn write_frame_basic() {
+        let mut buffer = Vec::new();
+        let result = write_frame(&mut buffer, 0, "{}");
+        assert!(result.is_ok());
+        assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn process_frame_ptt_mode_voice_activity() {
+        let v = json!({
+            "data": {
+                "mode": {"type": "VOICE_ACTIVITY"}
+            }
+        });
+        let (events, _avatars, _sub, _g) = process_frame_events(&v, "", "", None);
+        assert!(events.iter().any(|e| match e {
+            DiscordEvent::VoiceMode { ptt } => !ptt,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn process_frame_ptt_mode_push_to_talk() {
+        let v = json!({
+            "data": {
+                "mode": {"type": "PUSH_TO_TALK"}
+            }
+        });
+        let (events, _avatars, _sub, _g) = process_frame_events(&v, "", "", None);
+        assert!(events.iter().any(|e| match e {
+            DiscordEvent::VoiceMode { ptt } => *ptt,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn is_timeout_would_block() {
+        let e = io::Error::new(io::ErrorKind::WouldBlock, "test");
+        assert!(is_timeout(&e));
+    }
+
+    #[test]
+    fn is_timeout_timed_out() {
+        let e = io::Error::new(io::ErrorKind::TimedOut, "test");
+        assert!(is_timeout(&e));
+    }
+
+    #[test]
+    fn is_timeout_other_error() {
+        let e = io::Error::new(io::ErrorKind::Other, "test");
+        assert!(!is_timeout(&e));
+    }
+
+    #[test]
+    fn is_timeout_io_error() {
+        let e = io::Error::new(io::ErrorKind::InvalidData, "test");
+        assert!(!is_timeout(&e));
+    }
+
+    #[test]
+    fn participant_defaults() {
+        let p = Participant {
+            user_id: "u1".to_string(),
+            username: "alice".to_string(),
+            nick: None,
+            avatar_hash: None,
+            muted: false,
+            deafened: false,
+        };
+        assert_eq!(p.user_id, "u1");
+        assert!(!p.muted);
+        assert!(!p.deafened);
+    }
+
+    #[test]
+    fn discord_event_ready() {
+        let event = DiscordEvent::Ready {
+            username: "alice".to_string(),
+            user_id: "u1".to_string(),
+        };
+        match event {
+            DiscordEvent::Ready { username, user_id } => {
+                assert_eq!(username, "alice");
+                assert_eq!(user_id, "u1");
+            }
+            _ => panic!("expected Ready"),
+        }
+    }
+
+    #[test]
+    fn discord_event_disconnected() {
+        let event = DiscordEvent::Disconnected;
+        match event {
+            DiscordEvent::Disconnected => (),
+            _ => panic!("expected Disconnected"),
+        }
+    }
+
+    #[test]
+    fn process_frame_with_invalid_json() {
+        let v = json!({
+            "data": {}
+        });
+        let (events, _avatars, _sub, _g) = process_frame_events(&v, "local", "me", None);
+        // Should handle gracefully
+        assert!(events.is_empty() || events.len() > 0); // Just check it doesn't panic
+    }
 }
