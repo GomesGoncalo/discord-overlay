@@ -261,13 +261,13 @@ impl EventHandler for VoiceChannelSelectHandler {
                 channel_name,
             }];
 
-            return Some((events, avatars, subscribe_channel, guild_id));
+            Some((events, avatars, subscribe_channel, guild_id))
         } else {
             let events = vec![DiscordEvent::VoiceParticipants {
                 participants: vec![],
                 channel_name: None,
             }];
-            return Some((events, Vec::new(), None, None));
+            Some((events, Vec::new(), None, None))
         }
     }
 }
@@ -410,7 +410,7 @@ impl EventHandler for VoiceChannelSelectEventHandler {
     ) -> Option<FrameProcessResult> {
         let cid = v["data"]["channel_id"].as_str().unwrap_or("");
         if !cid.is_empty() {
-            return Some((Vec::new(), Vec::new(), Some(cid.to_string()), None));
+            Some((Vec::new(), Vec::new(), Some(cid.to_string()), None))
         } else {
             let events = vec![
                 DiscordEvent::GuildName {
@@ -421,7 +421,7 @@ impl EventHandler for VoiceChannelSelectEventHandler {
                     channel_name: None,
                 },
             ];
-            return Some((events, Vec::new(), None, None));
+            Some((events, Vec::new(), None, None))
         }
     }
 }
