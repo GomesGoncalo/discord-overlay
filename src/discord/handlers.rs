@@ -1,7 +1,7 @@
 //! Event handlers for Discord IPC frame processing.
 
 use super::parser::{parse_participants, parse_voice_state};
-use super::types::{DiscordEvent, JsonExt, ParticipantBuilder};
+use super::types::{DiscordEvent, JsonExt, Participant, ParticipantBuilder};
 use serde_json::Value;
 
 pub type FrameProcessResult = (
@@ -10,6 +10,46 @@ pub type FrameProcessResult = (
     Option<String>,
     Option<String>,
 );
+
+/// Cached data about the local user from participant list.
+struct SelfParticipantData {
+    nick: Option<String>,
+    avatar_hash: Option<String>,
+    muted: bool,
+    deafened: bool,
+}
+
+/// Extract local user's data from participant list in a single pass.
+/// Returns the data and a vec of all other participants.
+fn extract_self_data(
+    participants: &[Participant],
+    local_user_id: &str,
+    local_avatar: Option<&String>,
+) -> (SelfParticipantData, Vec<Participant>) {
+    let self_data = participants
+        .iter()
+        .find(|p| p.user_id == local_user_id)
+        .map(|p| SelfParticipantData {
+            nick: p.nick.clone(),
+            avatar_hash: local_avatar.cloned().or_else(|| p.avatar_hash.clone()),
+            muted: p.muted,
+            deafened: p.deafened,
+        })
+        .unwrap_or(SelfParticipantData {
+            nick: None,
+            avatar_hash: local_avatar.cloned(),
+            muted: false,
+            deafened: false,
+        });
+
+    let others = participants
+        .iter()
+        .filter(|p| p.user_id != local_user_id)
+        .cloned()
+        .collect();
+
+    (self_data, others)
+}
 
 pub trait EventHandler {
     fn matches(&self, v: &Value) -> bool;
@@ -59,35 +99,17 @@ impl EventHandler for VoiceChannelSelectHandler {
         if !v["data"].is_null() {
             let subscribe_channel = v["data"].get_str_option("id");
 
-            let others = parse_participants(&v["data"]);
-            let self_nick = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .and_then(|p| p.nick.clone());
-            let self_avatar = local_avatar.cloned().or_else(|| {
-                others
-                    .iter()
-                    .find(|p| p.user_id == local_user_id)
-                    .and_then(|p| p.avatar_hash.clone())
-            });
-            let self_muted = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .map(|p| p.muted)
-                .unwrap_or(false);
-            let self_deafened = others
-                .iter()
-                .find(|p| p.user_id == local_user_id)
-                .map(|p| p.deafened)
-                .unwrap_or(false);
+            let all_participants = parse_participants(&v["data"]);
+            let (self_data, others) =
+                extract_self_data(&all_participants, local_user_id, local_avatar);
 
             let mut parts = vec![ParticipantBuilder::new(local_user_id, local_username)
-                .nick(self_nick)
-                .avatar_hash(self_avatar.clone())
-                .muted(self_muted)
-                .deafened(self_deafened)
+                .nick(self_data.nick)
+                .avatar_hash(self_data.avatar_hash.clone())
+                .muted(self_data.muted)
+                .deafened(self_data.deafened)
                 .build()];
-            parts.extend(others.into_iter().filter(|p| p.user_id != local_user_id));
+            parts.extend(others);
 
             let channel_name = v["data"]["name"]
                 .as_str()
