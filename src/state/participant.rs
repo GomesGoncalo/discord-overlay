@@ -1,9 +1,9 @@
 //! Participant state and animations.
 
-use crate::discord;
+use crate::discord::{self, UserId};
 
 pub struct ParticipantState {
-    pub user_id: String,
+    pub user_id: UserId,
     pub display_name: String,
     pub muted: bool,
     pub deafened: bool,
@@ -16,7 +16,7 @@ pub struct ParticipantState {
 
 /// Builder for ParticipantState with sensible defaults.
 pub struct ParticipantStateBuilder {
-    user_id: String,
+    user_id: UserId,
     display_name: String,
     muted: bool,
     deafened: bool,
@@ -41,7 +41,7 @@ impl ParticipantStateBuilder {
 
     /// Create a new builder with minimal required fields.
     #[allow(dead_code)]
-    pub fn new(user_id: impl Into<String>, display_name: impl Into<String>) -> Self {
+    pub fn new(user_id: impl Into<UserId>, display_name: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
             display_name: display_name.into(),

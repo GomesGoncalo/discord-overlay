@@ -47,9 +47,9 @@ pub struct App {
     pub opacity: f32,
     // Voice participants
     pub participants: Vec<ParticipantState>,
-    pub avatar_textures: HashMap<String, glow::NativeTexture>,
-    pub name_textures: HashMap<String, (glow::NativeTexture, u32, u32)>,
-    pub initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)>,
+    pub avatar_textures: HashMap<crate::discord::UserId, glow::NativeTexture>,
+    pub name_textures: HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
+    pub initials_textures: HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
     pub font: Option<fontdue::Font>,
     // Channel name display
     pub channel_name: Option<String>,
@@ -80,7 +80,7 @@ pub struct App {
     pub ptt_mode: bool,
     pub ptt_active: bool,
     // Local user identity (set from Ready event)
-    pub self_user_id: String,
+    pub self_user_id: crate::discord::UserId,
 }
 
 /// Parameters for rendering a single participant row.
@@ -90,7 +90,7 @@ struct ParticipantRowParams {
     muted: bool,
     deafened: bool,
     speaking: bool,
-    user_id: String,
+    user_id: crate::discord::UserId,
     display_name: String,
 }
 
@@ -177,8 +177,11 @@ impl App {
     }
 
     /// Find a participant by user ID (mutable).
-    fn find_participant_mut(&mut self, user_id: &str) -> Option<&mut ParticipantState> {
-        self.participants.iter_mut().find(|p| p.user_id == user_id)
+    fn find_participant_mut(
+        &mut self,
+        user_id: &crate::discord::UserId,
+    ) -> Option<&mut ParticipantState> {
+        self.participants.iter_mut().find(|p| &p.user_id == user_id)
     }
 
     /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
@@ -190,7 +193,7 @@ impl App {
         );
 
         // Ensure initials exist for missing avatars (simplifies the core draw path)
-        let missing_initials: Vec<(String, String)> = self
+        let missing_initials: Vec<(crate::discord::UserId, String)> = self
             .participants
             .iter()
             .filter(|p| !self.avatar_textures.contains_key(&p.user_id))
@@ -243,18 +246,18 @@ impl App {
         self.layer.wl_surface().commit();
     }
 
-    pub fn make_name_texture(&mut self, user_id: &str, name: &str) {
+    pub fn make_name_texture(&mut self, user_id: &crate::discord::UserId, name: &str) {
         if let Some(font) = &self.font {
             let font_size = self.config.font_size;
             let (pixels, w, h) = render_text_texture(font, name, font_size);
             if w > 0 && h > 0 {
                 let tex = self.egl.upload_texture_wh(&pixels, w, h);
-                self.name_textures.insert(user_id.to_string(), (tex, w, h));
+                self.name_textures.insert(user_id.clone(), (tex, w, h));
             }
         }
     }
 
-    pub fn ensure_initial_texture(&mut self, user_id: &str, display_name: &str) {
+    pub fn ensure_initial_texture(&mut self, user_id: &crate::discord::UserId, display_name: &str) {
         if self.initials_textures.contains_key(user_id) {
             return;
         }
@@ -264,8 +267,7 @@ impl App {
             .map(|c| c.to_uppercase().to_string())
             .unwrap_or_else(|| "?".to_string());
         if let Some((tex, w, h)) = self.render_text_tex(&initial, 20.0) {
-            self.initials_textures
-                .insert(user_id.to_string(), (tex, w, h));
+            self.initials_textures.insert(user_id.clone(), (tex, w, h));
         }
     }
 
@@ -320,7 +322,7 @@ impl App {
                     .iter()
                     .map(|p| ParticipantStateBuilder::from_discord(p).build())
                     .collect();
-                let user_names: Vec<(String, String)> = self
+                let user_names: Vec<(crate::discord::UserId, String)> = self
                     .participants
                     .iter()
                     .map(|p| (p.user_id.clone(), p.display_name.clone()))
@@ -888,7 +890,7 @@ impl App {
         }
 
         // Collect visible participant data to avoid re-borrowing self in the loop
-        let visible: Vec<(usize, f32, bool, bool, bool, String, String)> = self
+        let visible: Vec<(usize, f32, bool, bool, bool, crate::discord::UserId, String)> = self
             .participants
             .iter()
             .enumerate()
@@ -965,7 +967,7 @@ fn delete_texture_if_present(
 /// Delete all textures in a hashmap (Batch resource cleanup helper).
 fn delete_all_textures_in_map(
     egl: &dyn EglBackend,
-    textures: &mut HashMap<String, (glow::NativeTexture, u32, u32)>,
+    textures: &mut HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
 ) {
     for (_, (tex, _, _)) in textures.drain() {
         egl.delete_texture(tex);
@@ -975,7 +977,7 @@ fn delete_all_textures_in_map(
 /// Delete all avatar textures in a hashmap.
 fn delete_all_avatar_textures(
     egl: &dyn EglBackend,
-    textures: &mut HashMap<String, glow::NativeTexture>,
+    textures: &mut HashMap<crate::discord::UserId, glow::NativeTexture>,
 ) {
     for (_, tex) in textures.drain() {
         egl.delete_texture(tex);
@@ -992,8 +994,8 @@ pub(crate) fn draw_compact_core(
     opacity: f32,
     idle_alpha: f32,
     participants: &[ParticipantState],
-    avatar_textures: &HashMap<String, glow::NativeTexture>,
-    initials_textures: &HashMap<String, (glow::NativeTexture, u32, u32)>,
+    avatar_textures: &HashMap<crate::discord::UserId, glow::NativeTexture>,
+    initials_textures: &HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
     speaking_color: [f32; 3],
 ) {
     let op = opacity * idle_alpha;
@@ -1169,15 +1171,16 @@ mod tests_state_helpers {
 
     #[test]
     fn draw_compact_core_with_avatar() {
+        use crate::discord::UserId;
         use crate::render::MockEgl;
         use std::collections::HashMap;
         let egl = MockEgl::new();
-        let mut avatar_textures: HashMap<String, glow::NativeTexture> = HashMap::new();
-        let initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let mut avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> = HashMap::new();
         let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
-        avatar_textures.insert("u1".to_string(), tex);
+        avatar_textures.insert(UserId("u1".to_string()), tex);
         let p = ParticipantState {
-            user_id: "u1".to_string(),
+            user_id: UserId("u1".to_string()),
             display_name: "Alice".to_string(),
             muted: false,
             deafened: false,
@@ -1201,16 +1204,17 @@ mod tests_state_helpers {
 
     #[test]
     fn draw_compact_core_placeholder_and_speaking() {
+        use crate::discord::UserId;
         use crate::render::MockEgl;
         use std::collections::HashMap;
         let egl = MockEgl::new();
-        let avatar_textures: HashMap<String, glow::NativeTexture> = HashMap::new();
-        let mut initials_textures: HashMap<String, (glow::NativeTexture, u32, u32)> =
+        let avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let mut initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> =
             HashMap::new();
         let tex = egl.upload_texture_wh(&[255u8; 4], 4, 4);
-        initials_textures.insert("u2".to_string(), (tex, 8, 8));
+        initials_textures.insert(UserId("u2".to_string()), (tex, 8, 8));
         let p = ParticipantState {
-            user_id: "u2".to_string(),
+            user_id: UserId("u2".to_string()),
             display_name: "Bob".to_string(),
             muted: false,
             deafened: false,
@@ -1242,7 +1246,7 @@ mod tests_discord_events {
     #[test]
     fn participant_state_defaults() {
         let _p = ParticipantState {
-            user_id: "test".to_string(),
+            user_id: crate::discord::UserId("test".to_string()),
             display_name: "Test User".to_string(),
             muted: false,
             deafened: false,
@@ -1260,7 +1264,7 @@ mod tests_discord_events {
     #[test]
     fn participant_with_speaking() {
         let mut p = ParticipantState {
-            user_id: "test".to_string(),
+            user_id: crate::discord::UserId("test".to_string()),
             display_name: "Test User".to_string(),
             muted: false,
             deafened: false,
@@ -1276,7 +1280,7 @@ mod tests_discord_events {
     #[test]
     fn participant_leaving_animation() {
         let mut p = ParticipantState {
-            user_id: "test".to_string(),
+            user_id: crate::discord::UserId("test".to_string()),
             display_name: "Test User".to_string(),
             muted: false,
             deafened: false,
@@ -1291,7 +1295,7 @@ mod tests_discord_events {
     #[test]
     fn participant_state_builder_from_discord() {
         let discord_p = crate::discord::Participant {
-            user_id: "123".to_string(),
+            user_id: crate::discord::UserId("123".to_string()),
             username: "alice".to_string(),
             nick: Some("Alice".to_string()),
             avatar_hash: Some("abc123".to_string()),
@@ -1309,7 +1313,7 @@ mod tests_discord_events {
     #[test]
     fn participant_state_builder_custom_anim() {
         let discord_p = crate::discord::Participant {
-            user_id: "456".to_string(),
+            user_id: crate::discord::UserId("456".to_string()),
             username: "bob".to_string(),
             nick: None,
             avatar_hash: None,
@@ -1342,7 +1346,7 @@ mod tests_discord_events {
     fn user_joined_sets_in_channel() {
         // Verify that UserJoined event sets in_channel flag for visibility
         let discord_p = crate::discord::Participant {
-            user_id: "111".to_string(),
+            user_id: crate::discord::UserId("111".to_string()),
             username: "alice".to_string(),
             nick: Some("Alice".to_string()),
             avatar_hash: None,

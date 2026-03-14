@@ -6,7 +6,7 @@ use serde_json::Value;
 
 pub type FrameProcessResult = (
     Vec<DiscordEvent>,
-    Vec<(String, String)>,
+    Vec<(crate::discord::UserId, String)>,
     Option<String>,
     Option<String>,
 );
@@ -103,12 +103,15 @@ impl EventHandler for VoiceChannelSelectHandler {
             let (self_data, others) =
                 extract_self_data(&all_participants, local_user_id, local_avatar);
 
-            let mut parts = vec![ParticipantBuilder::new(local_user_id, local_username)
-                .nick(self_data.nick)
-                .avatar_hash(self_data.avatar_hash.clone())
-                .muted(self_data.muted)
-                .deafened(self_data.deafened)
-                .build()];
+            let mut parts =
+                vec![
+                    ParticipantBuilder::new(local_user_id.to_string(), local_username)
+                        .nick(self_data.nick)
+                        .avatar_hash(self_data.avatar_hash.clone())
+                        .muted(self_data.muted)
+                        .deafened(self_data.deafened)
+                        .build(),
+                ];
             parts.extend(others);
 
             let channel_name = v["data"]["name"]
@@ -159,7 +162,7 @@ impl EventHandler for SpeakingStartHandler {
     ) -> Option<FrameProcessResult> {
         if let Some(uid) = v["data"].get_str_option("user_id") {
             let events = vec![DiscordEvent::SpeakingUpdate {
-                user_id: uid,
+                user_id: uid.into(),
                 speaking: true,
             }];
             return Some((events, Vec::new(), None, None));
@@ -183,7 +186,7 @@ impl EventHandler for SpeakingEndHandler {
     ) -> Option<FrameProcessResult> {
         if let Some(uid) = v["data"].get_str_option("user_id") {
             let events = vec![DiscordEvent::SpeakingUpdate {
-                user_id: uid,
+                user_id: uid.into(),
                 speaking: false,
             }];
             return Some((events, Vec::new(), None, None));
@@ -259,7 +262,7 @@ impl EventHandler for VoiceStateDeleteHandler {
     ) -> Option<FrameProcessResult> {
         if let Some(uid) = v["data"]["user"]["id"].as_str() {
             let events = vec![DiscordEvent::UserLeft {
-                user_id: uid.to_string(),
+                user_id: uid.into(),
             }];
             return Some((events, Vec::new(), None, None));
         }
@@ -325,7 +328,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             DiscordEvent::SpeakingUpdate { user_id, speaking } => {
-                assert_eq!(user_id, "u1");
+                assert!(user_id == "u1");
                 assert!(*speaking);
             }
             _ => panic!("expected SpeakingUpdate"),
@@ -342,7 +345,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             DiscordEvent::SpeakingUpdate { user_id, speaking } => {
-                assert_eq!(user_id, "u2");
+                assert!(user_id == "u2");
                 assert!(!*speaking);
             }
             _ => panic!("expected SpeakingUpdate"),
@@ -367,7 +370,7 @@ mod tests {
                 muted,
                 deafened,
             } => {
-                assert_eq!(user_id, "u3");
+                assert!(user_id == "u3");
                 assert!(*muted);
                 assert!(!*deafened);
             }
@@ -409,7 +412,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             DiscordEvent::UserLeft { user_id } => {
-                assert_eq!(user_id, "u5");
+                assert!(user_id == "u5");
             }
             _ => panic!("expected UserLeft"),
         }

@@ -113,7 +113,7 @@ fn main() {
 
                 // Animate participant rows (~180ms to fully appear/disappear)
                 let anim_speed = 0.016_f32 / 0.18;
-                let mut to_remove: Vec<String> = Vec::new();
+                let mut to_remove: Vec<crate::discord::UserId> = Vec::new();
                 for p in &mut app.participants {
                     if p.leaving {
                         p.anim = (p.anim - anim_speed).max(0.0);
@@ -317,7 +317,7 @@ fn main() {
         last_click_time: None,
         ptt_mode: false,
         ptt_active: false,
-        self_user_id: String::new(),
+        self_user_id: crate::discord::UserId::default(),
         config: cfg,
     };
 
@@ -373,7 +373,7 @@ fn main() {
                 app.opacity = new_cfg.opacity;
                 app.max_visible_rows = new_cfg.max_visible_rows;
                 // Regenerate participant name textures with (possibly) new font size
-                let user_ids: Vec<String> =
+                let user_ids: Vec<crate::discord::UserId> =
                     app.participants.iter().map(|p| p.user_id.clone()).collect();
                 let names: Vec<String> = app
                     .participants

@@ -1,16 +1,74 @@
 //! Public types for Discord IPC communication.
 
 use serde_json::Value;
+use std::fmt;
 
 pub struct Config {
     pub client_id: String,
     pub client_secret: String,
 }
 
+/// Unique Discord user identifier.
+/// Wrapping String in a newtype prevents accidental parameter swaps
+/// and makes intent clearer at call sites.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct UserId(pub String);
+
+impl UserId {
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn bytes(&self) -> std::str::Bytes<'_> {
+        self.0.bytes()
+    }
+}
+
+impl fmt::Display for UserId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for UserId {
+    fn from(s: String) -> Self {
+        UserId(s)
+    }
+}
+
+impl From<&str> for UserId {
+    fn from(s: &str) -> Self {
+        UserId(s.to_string())
+    }
+}
+
+impl PartialEq<&str> for UserId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<&str> for &UserId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<String> for UserId {
+    fn eq(&self, other: &String) -> bool {
+        &self.0 == other
+    }
+}
+
 /// A participant in the current voice channel.
 #[derive(Debug, Clone)]
 pub struct Participant {
-    pub user_id: String,
+    pub user_id: UserId,
     pub username: String,
     pub nick: Option<String>,
     pub avatar_hash: Option<String>,
@@ -24,7 +82,7 @@ pub struct Participant {
 #[derive(Debug)]
 pub enum DiscordEvent {
     /// Successfully authenticated; contains the Discord username and user ID.
-    Ready { username: String, user_id: String },
+    Ready { username: String, user_id: UserId },
     /// Current mute/deafen state (sent on connect and on change).
     VoiceSettings { mute: bool, deaf: bool },
     /// Voice input mode: true = push-to-talk, false = voice activity.
@@ -37,18 +95,18 @@ pub enum DiscordEvent {
     /// A user joined the voice channel.
     UserJoined(Participant),
     /// A user left the voice channel.
-    UserLeft { user_id: String },
+    UserLeft { user_id: UserId },
     /// A user's mute/deaf state changed.
     ParticipantStateUpdate {
-        user_id: String,
+        user_id: UserId,
         muted: bool,
         deafened: bool,
     },
     /// A user started or stopped speaking.
-    SpeakingUpdate { user_id: String, speaking: bool },
+    SpeakingUpdate { user_id: UserId, speaking: bool },
     /// Avatar image downloaded and decoded.
     AvatarLoaded {
-        user_id: String,
+        user_id: UserId,
         rgba: Vec<u8>,
         size: u32,
     },
@@ -112,7 +170,7 @@ impl JsonExt for Value {
 
 /// Builder for Participant with sensible defaults.
 pub struct ParticipantBuilder {
-    user_id: String,
+    user_id: UserId,
     username: String,
     nick: Option<String>,
     avatar_hash: Option<String>,
@@ -121,7 +179,7 @@ pub struct ParticipantBuilder {
 }
 
 impl ParticipantBuilder {
-    pub fn new(user_id: impl Into<String>, username: impl Into<String>) -> Self {
+    pub fn new(user_id: impl Into<UserId>, username: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
             username: username.into(),
