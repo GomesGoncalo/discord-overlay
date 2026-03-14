@@ -48,31 +48,54 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
+        Self::load_with_retry(3)
+    }
+
+    /// Load config with retry logic for in-progress file writes.
+    ///
+    /// When config file is being written, a read may catch the file mid-write.
+    /// This retries with a small delay to allow writes to complete.
+    /// Env vars (DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET) override config file values.
+    pub fn load_with_retry(max_retries: usize) -> Self {
         let path = dirs_config_path();
-        let mut cfg: Config = match std::fs::read_to_string(&path) {
-            Ok(text) => match toml::from_str(&text) {
-                Ok(c) => {
-                    info!("loaded from {path:?}");
-                    c
+        let mut cfg = None;
+
+        for attempt in 1..=max_retries {
+            match std::fs::read_to_string(&path) {
+                Ok(text) => match toml::from_str::<Config>(&text) {
+                    Ok(c) => {
+                        info!("loaded from {path:?}");
+                        cfg = Some(c);
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("parse error in {path:?}: {e}");
+                        if attempt < max_retries {
+                            // TOML parse error might indicate incomplete file write
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            continue;
+                        }
+                        warn!("using defaults after {} retries", max_retries);
+                    }
+                },
+                Err(_) => {
+                    info!("no config file found at {path:?}, using defaults");
+                    break;
                 }
-                Err(e) => {
-                    warn!("parse error in {path:?}: {e}, using defaults");
-                    Self::default()
-                }
-            },
-            Err(_) => {
-                info!("no config file found at {path:?}, using defaults");
-                Self::default()
             }
-        };
+        }
+
+        let mut config = cfg.unwrap_or_default();
+
         // Env vars override config file (useful for secrets in systemd unit overrides)
         if let Ok(v) = std::env::var("DISCORD_CLIENT_ID") {
-            cfg.discord_client_id = v;
+            config.discord_client_id = v;
         }
         if let Ok(v) = std::env::var("DISCORD_CLIENT_SECRET") {
-            cfg.discord_client_secret = v;
+            config.discord_client_secret = v;
         }
-        cfg
+
+        config
     }
 
     /// Write a default config file if none exists.
