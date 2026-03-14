@@ -13,50 +13,9 @@ const EGL_PLATFORM_WAYLAND_KHR: egl::Enum = 0x31D8;
 
 // ─── Procedural icon generation ──────────────────────────────────────────────
 
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+pub mod math;
 
-fn sdf_rrect(px: f32, py: f32, cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> f32 {
-    let dx = (px - cx).abs() - hw + r;
-    let dy = (py - cy).abs() - hh + r;
-    dx.max(0.0).hypot(dy.max(0.0)) + dx.min(0.0).max(dy.min(0.0)) - r
-}
-
-fn sdf_arc(px: f32, py: f32, cx: f32, cy: f32, r: f32, w: f32, bottom: bool) -> f32 {
-    let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
-    let ring = (d - r).abs() - w;
-    if bottom {
-        if py <= cy {
-            ring
-        } else {
-            99.0
-        }
-    } else if py >= cy {
-        ring
-    } else {
-        99.0
-    }
-}
-
-fn rasterize(size: u32, sdf_fn: impl Fn(f32, f32) -> f32) -> Vec<u8> {
-    let s = size as f32;
-    let aa = 1.5 / s;
-    let mut buf = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let px = x as f32 / s - 0.5;
-            let py = y as f32 / s - 0.5;
-            let d = sdf_fn(px, py);
-            let a = (1.0 - smoothstep(-aa, aa, d)) * 255.0;
-            let i = ((y * size + x) * 4) as usize;
-            buf[i..i + 3].fill(255);
-            buf[i + 3] = a as u8;
-        }
-    }
-    buf
-}
+pub use math::{rasterize, sdf_arc, sdf_rrect, smoothstep};
 
 fn icon_mic(size: u32) -> Vec<u8> {
     rasterize(size, |px, py| {
@@ -101,10 +60,7 @@ fn icon_strikeout(size: u32) -> Vec<u8> {
     buf
 }
 
-// ─── EGL + GL context ───────────────────────────────────────────────────────-
-
-// GL-specific texture upload helpers live in render::textures (extracted).
-
+pub mod compile;
 pub mod text;
 pub mod textures;
 

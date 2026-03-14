@@ -1,5 +1,3 @@
-//! Extracted EglContext implementation (moved from mod.rs)
-
 #[cfg(not(test))]
 use std::ffi::c_void;
 
@@ -150,38 +148,7 @@ impl EglContext {
         }
 
         // Compile and link the shader program
-        let program = unsafe {
-            let vs = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(vs, VERT_SRC);
-            gl.compile_shader(vs);
-            assert!(
-                gl.get_shader_compile_status(vs),
-                "vertex shader: {}",
-                gl.get_shader_info_log(vs)
-            );
-
-            let fs = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(fs, FRAG_SRC);
-            gl.compile_shader(fs);
-            assert!(
-                gl.get_shader_compile_status(fs),
-                "fragment shader: {}",
-                gl.get_shader_info_log(fs)
-            );
-
-            let prog = gl.create_program().unwrap();
-            gl.attach_shader(prog, vs);
-            gl.attach_shader(prog, fs);
-            gl.link_program(prog);
-            assert!(
-                gl.get_program_link_status(prog),
-                "link: {}",
-                gl.get_program_info_log(prog)
-            );
-            gl.delete_shader(vs);
-            gl.delete_shader(fs);
-            prog
-        };
+        let program = unsafe { super::compile::compile_program(&gl, VERT_SRC, FRAG_SRC) };
 
         let loc_color = unsafe { gl.get_uniform_location(program, "u_color") }.unwrap();
         let loc_size = unsafe { gl.get_uniform_location(program, "u_size") }.unwrap();
@@ -191,59 +158,12 @@ impl EglContext {
         let vbo = unsafe { gl.create_buffer().unwrap() };
 
         // ── Icon overlay shader ──────────────────────────────────────────────
-        let icon_prog = unsafe {
-            let vs = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(vs, VERT_SRC);
-            gl.compile_shader(vs);
-            let fs = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(fs, ICON_FRAG_SRC);
-            gl.compile_shader(fs);
-            assert!(
-                gl.get_shader_compile_status(fs),
-                "icon FS: {}",
-                gl.get_shader_info_log(fs)
-            );
-            let prog = gl.create_program().unwrap();
-            gl.attach_shader(prog, vs);
-            gl.attach_shader(prog, fs);
-            gl.link_program(prog);
-            assert!(
-                gl.get_program_link_status(prog),
-                "icon link: {}",
-                gl.get_program_info_log(prog)
-            );
-            gl.delete_shader(vs);
-            gl.delete_shader(fs);
-            prog
-        };
+        let icon_prog = unsafe { super::compile::compile_program(&gl, VERT_SRC, ICON_FRAG_SRC) };
         let icon_loc_opacity = unsafe { gl.get_uniform_location(icon_prog, "u_opacity").unwrap() };
 
         // ── Avatar circular-clip shader ──────────────────────────────────────
-        let avatar_prog = unsafe {
-            let vs = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(vs, VERT_SRC);
-            gl.compile_shader(vs);
-            let fs = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(fs, AVATAR_FRAG_SRC);
-            gl.compile_shader(fs);
-            assert!(
-                gl.get_shader_compile_status(fs),
-                "avatar FS: {}",
-                gl.get_shader_info_log(fs)
-            );
-            let prog = gl.create_program().unwrap();
-            gl.attach_shader(prog, vs);
-            gl.attach_shader(prog, fs);
-            gl.link_program(prog);
-            assert!(
-                gl.get_program_link_status(prog),
-                "avatar link: {}",
-                gl.get_program_info_log(prog)
-            );
-            gl.delete_shader(vs);
-            gl.delete_shader(fs);
-            prog
-        };
+        let avatar_prog =
+            unsafe { super::compile::compile_program(&gl, VERT_SRC, AVATAR_FRAG_SRC) };
         let avatar_loc_opacity =
             unsafe { gl.get_uniform_location(avatar_prog, "u_opacity").unwrap() };
 
