@@ -94,6 +94,18 @@ struct ParticipantRowParams {
     display_name: String,
 }
 
+/// Parameters for rendering a status icon (mute/deafen).
+struct StatusIconParams {
+    x: f32,
+    y: f32,
+    size: f32,
+    tex: glow::NativeTexture,
+    strike_tex: glow::NativeTexture,
+    is_active: bool,
+    opacity: f32,
+    bg_opacity: Option<f32>, // None = no background, Some(val) = draw background
+}
+
 // ─── App methods ─────────────────────────────────────────────────────────────
 
 impl App {
@@ -513,6 +525,87 @@ impl App {
         }
     }
 
+    /// Draw an icon with optional strikeout overlay (without background).
+    ///
+    /// Used for button icons (mute/deafen buttons) where the button background is separate.
+    fn draw_icon_with_strikeout(&self, params: &StatusIconParams, sw: f32, sh: f32) {
+        self.egl.draw_icon(
+            params.x,
+            params.y,
+            params.size,
+            params.size,
+            sw,
+            sh,
+            params.tex,
+            params.opacity,
+        );
+        if params.is_active {
+            self.egl.draw_icon(
+                params.x,
+                params.y,
+                params.size,
+                params.size,
+                sw,
+                sh,
+                params.strike_tex,
+                params.opacity,
+            );
+        }
+    }
+
+    /// Draw a status icon (mute, deafen) with optional background and strikeout overlay.
+    ///
+    /// Handles drawing the icon, optional background rect when active, and strikeout.
+    /// Used for both button mute/deaf indicators and per-participant indicators.
+    fn draw_status_icon(&self, params: &StatusIconParams, sw: f32, sh: f32) {
+        // Optional background when active
+        if params.is_active {
+            if let Some(bg_op) = params.bg_opacity {
+                self.egl.draw_rect(
+                    params.x - 2.0,
+                    params.y - 2.0,
+                    params.size + 4.0,
+                    params.size + 4.0,
+                    sw,
+                    sh,
+                    [
+                        self.config.muted_color[0],
+                        self.config.muted_color[1],
+                        self.config.muted_color[2],
+                        bg_op,
+                    ],
+                    4.0,
+                );
+            }
+        }
+
+        // Icon itself
+        self.egl.draw_icon(
+            params.x,
+            params.y,
+            params.size,
+            params.size,
+            sw,
+            sh,
+            params.tex,
+            params.opacity,
+        );
+
+        // Strikeout overlay when active
+        if params.is_active {
+            self.egl.draw_icon(
+                params.x,
+                params.y,
+                params.size,
+                params.size,
+                sw,
+                sh,
+                params.strike_tex,
+                params.opacity * 0.85,
+            );
+        }
+    }
+
     /// Draw a single participant row (avatar, name, status icons, etc.).
     ///
     /// Handles: row background, speaking ring, avatar/initials, name text,
@@ -632,81 +725,41 @@ impl App {
         let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
         let hp_x = sw - icon_sz - 8.0;
 
-        // Mute icon
+        // Mute icon with background when muted
         let mic_op = if params.muted {
             row_anim_op * 0.9
         } else {
             row_anim_op * 0.35
         };
-        if params.muted {
-            self.egl.draw_rect(
-                mic_x - 2.0,
-                icon_y - 2.0,
-                icon_sz + 4.0,
-                icon_sz + 4.0,
-                sw,
-                sh,
-                [
-                    self.config.muted_color[0],
-                    self.config.muted_color[1],
-                    self.config.muted_color[2],
-                    0.6 * row_anim_op,
-                ],
-                4.0,
-            );
-        }
-        self.egl
-            .draw_icon(mic_x, icon_y, icon_sz, icon_sz, sw, sh, mic_tex, mic_op);
-        if params.muted {
-            self.egl.draw_icon(
-                mic_x,
-                icon_y,
-                icon_sz,
-                icon_sz,
-                sw,
-                sh,
-                strike_tex,
-                row_anim_op * 0.85,
-            );
-        }
+        let mute_params = StatusIconParams {
+            x: mic_x,
+            y: icon_y,
+            size: icon_sz,
+            tex: mic_tex,
+            strike_tex,
+            is_active: params.muted,
+            opacity: mic_op,
+            bg_opacity: Some(0.6 * row_anim_op),
+        };
+        self.draw_status_icon(&mute_params, sw, sh);
 
-        // Deafen icon
+        // Deafen icon with background when deafened
         let hp_op = if params.deafened {
             row_anim_op * 0.9
         } else {
             row_anim_op * 0.35
         };
-        if params.deafened {
-            self.egl.draw_rect(
-                hp_x - 2.0,
-                icon_y - 2.0,
-                icon_sz + 4.0,
-                icon_sz + 4.0,
-                sw,
-                sh,
-                [
-                    self.config.muted_color[0],
-                    self.config.muted_color[1],
-                    self.config.muted_color[2],
-                    0.6 * row_anim_op,
-                ],
-                4.0,
-            );
-        }
-        self.egl
-            .draw_icon(hp_x, icon_y, icon_sz, icon_sz, sw, sh, hp_tex, hp_op);
-        if params.deafened {
-            self.egl.draw_icon(
-                hp_x,
-                icon_y,
-                icon_sz,
-                icon_sz,
-                sw,
-                sh,
-                strike_tex,
-                row_anim_op * 0.85,
-            );
-        }
+        let deaf_params = StatusIconParams {
+            x: hp_x,
+            y: icon_y,
+            size: icon_sz,
+            tex: hp_tex,
+            strike_tex,
+            is_active: params.deafened,
+            opacity: hp_op,
+            bg_opacity: Some(0.6 * row_anim_op),
+        };
+        self.draw_status_icon(&deaf_params, sw, sh);
     }
 
     pub fn draw(&mut self) {
@@ -770,50 +823,32 @@ impl App {
         let mic_tex = self.egl.tex_mic();
         let hp_tex = self.egl.tex_headphone();
         let strike_tex = self.egl.tex_strikeout();
-        self.egl.draw_icon(
-            bx2 as f32 + pad,
-            by2 as f32 + pad,
-            bw2 as f32 - 2.0 * pad,
-            bh2 as f32 - 2.0 * pad,
-            sw,
-            sh,
-            mic_tex,
-            mic_alpha,
-        );
-        if effectively_muted {
-            self.egl.draw_icon(
-                bx2 as f32 + pad,
-                by2 as f32 + pad,
-                bw2 as f32 - 2.0 * pad,
-                bh2 as f32 - 2.0 * pad,
-                sw,
-                sh,
-                strike_tex,
-                op,
-            );
-        }
-        self.egl.draw_icon(
-            bx as f32 + pad,
-            by as f32 + pad,
-            bw as f32 - 2.0 * pad,
-            bh as f32 - 2.0 * pad,
-            sw,
-            sh,
-            hp_tex,
-            op,
-        );
-        if self.discord_deaf {
-            self.egl.draw_icon(
-                bx as f32 + pad,
-                by as f32 + pad,
-                bw as f32 - 2.0 * pad,
-                bh as f32 - 2.0 * pad,
-                sw,
-                sh,
-                strike_tex,
-                op,
-            );
-        }
+
+        // Mute icon on mute button
+        let mute_icon_params = StatusIconParams {
+            x: bx2 as f32 + pad,
+            y: by2 as f32 + pad,
+            size: bw2 as f32 - 2.0 * pad,
+            tex: mic_tex,
+            strike_tex,
+            is_active: effectively_muted,
+            opacity: mic_alpha,
+            bg_opacity: None,
+        };
+        self.draw_icon_with_strikeout(&mute_icon_params, sw, sh);
+
+        // Deafen icon on deafen button
+        let deaf_icon_params = StatusIconParams {
+            x: bx as f32 + pad,
+            y: by as f32 + pad,
+            size: bw as f32 - 2.0 * pad,
+            tex: hp_tex,
+            strike_tex,
+            is_active: self.discord_deaf,
+            opacity: op,
+            bg_opacity: None,
+        };
+        self.draw_icon_with_strikeout(&deaf_icon_params, sw, sh);
 
         // Restrict input to interactive areas only (rest is click-through)
         let region = Region::new(&self.compositor).expect("create region");
