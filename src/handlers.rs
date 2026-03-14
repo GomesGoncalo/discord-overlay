@@ -447,4 +447,53 @@ mod tests {
         let (_hx, _hy, _hw, hh) = drag_handle_rects(100, 10);
         assert_eq!(hh, 1);
     }
+
+    #[test]
+    fn button_rects_preserves_width() {
+        let (_, _, w, _) = button_rects(200, 100);
+        assert_eq!(w, 64);
+
+        let (_, _, w, _) = button_rects(500, 50);
+        assert_eq!(w, 64);
+    }
+
+    #[test]
+    fn button2_rects_at_right_edge() {
+        let (x1, _, _w1, _) = button_rects(360, 64);
+        let (x2, _, w2, _) = button2_rects(360, 64);
+        assert_eq!(x2, x1 - w2 - 8);
+    }
+
+    #[test]
+    fn drag_handle_ignores_width() {
+        let (x, _, _, _) = drag_handle_rects(200, 64);
+        assert_eq!(x, 8);
+
+        let (x, _, _, _) = drag_handle_rects(800, 100);
+        assert_eq!(x, 8);
+    }
+
+    #[test]
+    fn button_height_scales_with_window() {
+        let (_, _, _, h) = button_rects(100, 100);
+        assert_eq!(h, 84);
+
+        let (_, _, _, h) = button_rects(100, 50);
+        assert_eq!(h, 34);
+
+        let (_, _, _, h) = button_rects(100, 20);
+        assert_eq!(h, 4);
+
+        let (_, _, _, h) = button_rects(100, 8);
+        assert_eq!(h, 1);
+    }
+
+    #[test]
+    fn button_y_always_8() {
+        let (_, y, _, _) = button_rects(100, 64);
+        assert_eq!(y, 8);
+
+        let (_, y, _, _) = button_rects(500, 200);
+        assert_eq!(y, 8);
+    }
 }
