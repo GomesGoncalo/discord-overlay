@@ -5,31 +5,53 @@
 
 use crate::discord::DiscordEvent;
 use std::io::Read;
+use tracing::warn;
 
 /// Fetch avatar from Discord CDN and send decoded RGBA data via channel.
 ///
 /// Spawns a background thread to avoid blocking the main IPC loop.
-/// Handles HTTP fetch, PNG decode, and format conversion silently —
-/// failures are not reported (avatars are optional).
+/// Handles HTTP fetch, PNG decode, and format conversion.
+/// Failures are logged but not propagated (avatars are optional).
 pub fn fetch_and_send(user_id: String, hash: String, tx: calloop::channel::Sender<DiscordEvent>) {
     std::thread::spawn(move || {
         let base = base_url();
         let url = format!("{}/{}/{}.png?size=64", base, user_id, hash);
-        if let Ok(resp) = ureq::get(&url).call() {
-            let mut buf = Vec::new();
-            if resp.into_reader().read_to_end(&mut buf).is_ok() {
-                if let Ok(img) = image::load_from_memory(&buf) {
-                    let rgba = image::DynamicImage::from(img.to_rgba8()).flipv().to_rgba8();
-                    let (w, _h) = rgba.dimensions();
-                    let size = w;
-                    if size > 0 {
-                        let _ = tx.send(DiscordEvent::AvatarLoaded {
-                            user_id,
-                            rgba: rgba.into_raw(),
-                            size,
-                        });
+        match ureq::get(&url).call() {
+            Ok(resp) => {
+                let mut buf = Vec::new();
+                match resp.into_reader().read_to_end(&mut buf) {
+                    Ok(_) => match image::load_from_memory(&buf) {
+                        Ok(img) => {
+                            let rgba = image::DynamicImage::from(img.to_rgba8()).flipv().to_rgba8();
+                            let (w, _h) = rgba.dimensions();
+                            let size = w;
+                            if size > 0 {
+                                let _ = tx.send(DiscordEvent::AvatarLoaded {
+                                    user_id,
+                                    rgba: rgba.into_raw(),
+                                    size,
+                                });
+                            } else {
+                                warn!("Avatar for user {} has zero dimensions", user_id);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to decode avatar image for user {}: {}", user_id, e);
+                        }
+                    },
+                    Err(e) => {
+                        warn!(
+                            "Failed to read avatar HTTP response for user {}: {}",
+                            user_id, e
+                        );
                     }
                 }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to fetch avatar for user {} from {}: {}",
+                    user_id, url, e
+                );
             }
         }
     });

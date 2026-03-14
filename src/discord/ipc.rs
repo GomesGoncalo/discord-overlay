@@ -56,8 +56,16 @@ pub fn write_frame(stream: &mut impl Write, op: u32, payload: &str) -> io::Resul
 pub fn read_frame(stream: &mut impl Read) -> io::Result<(u32, Value)> {
     let mut hdr = [0u8; 8];
     stream.read_exact(&mut hdr)?;
-    let op = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-    let len = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as usize;
+    let op = u32::from_le_bytes(
+        hdr[0..4]
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid opcode header"))?,
+    );
+    let len = u32::from_le_bytes(
+        hdr[4..8]
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid length header"))?,
+    ) as usize;
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
     let v =
