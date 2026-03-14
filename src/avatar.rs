@@ -3,7 +3,7 @@
 //! Handles downloading Discord avatars from CDN and decoding PNG images
 //! to RGBA8 format suitable for GPU texture upload.
 
-use crate::discord::DiscordEvent;
+use crate::discord::{DiscordEvent, UserId};
 use std::io::Read;
 use tracing::warn;
 
@@ -12,7 +12,7 @@ use tracing::warn;
 /// Spawns a background thread to avoid blocking the main IPC loop.
 /// Handles HTTP fetch, PNG decode, and format conversion.
 /// Failures are logged but not propagated (avatars are optional).
-pub fn fetch_and_send(user_id: String, hash: String, tx: calloop::channel::Sender<DiscordEvent>) {
+pub fn fetch_and_send(user_id: UserId, hash: String, tx: calloop::channel::Sender<DiscordEvent>) {
     std::thread::spawn(move || {
         let base = base_url();
         let url = format!("{}/{}/{}.png?size=64", base, user_id, hash);

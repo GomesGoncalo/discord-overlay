@@ -1,5 +1,6 @@
 //! Error types for rendering operations.
 
+use crate::discord::UserId;
 use std::fmt;
 
 /// Errors that can occur during rendering setup or operations.
@@ -23,7 +24,7 @@ pub enum RenderError {
     /// Buffer object creation failed.
     BufferCreationFailed(String),
     /// Image decoding failed.
-    ImageDecodeFailed { user_id: String, error: String },
+    ImageDecodeFailed { user_id: UserId, error: String },
     /// Font rendering failed.
     FontRenderingFailed(String),
 }

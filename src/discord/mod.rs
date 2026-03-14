@@ -19,7 +19,7 @@ mod types;
 
 // Public re-exports
 pub use client::run_client;
-pub use types::{Config, DiscordCommand, DiscordEvent, Participant};
+pub use types::{Config, DiscordCommand, DiscordEvent, Participant, UserId};
 
 use std::sync::mpsc;
 

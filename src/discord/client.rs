@@ -116,7 +116,7 @@ fn try_connect(
     info!("authenticated");
     let _ = tx.send(DiscordEvent::Ready {
         username: local_username.clone(),
-        user_id: local_user_id.clone(),
+        user_id: local_user_id.clone().into(),
     });
 
     subscribe_initial(&mut stream);
@@ -221,7 +221,7 @@ fn try_connect(
                             .map(|p| p.deafened)
                             .unwrap_or(false);
                         let mut parts = vec![super::types::Participant {
-                            user_id: local_user_id.clone(),
+                            user_id: local_user_id.as_str().into(),
                             username: local_username.clone(),
                             nick: self_nick,
                             avatar_hash: self_avatar,
@@ -291,7 +291,7 @@ fn try_connect(
                     if let Some(uid) = v["data"]["user_id"].as_str() {
                         debug!("speaking_start user_id={uid}");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
-                            user_id: uid.to_string(),
+                            user_id: uid.into(),
                             speaking: true,
                         });
                     }
@@ -299,7 +299,7 @@ fn try_connect(
                     if let Some(uid) = v["data"]["user_id"].as_str() {
                         debug!("speaking_end user_id={uid}");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
-                            user_id: uid.to_string(),
+                            user_id: uid.into(),
                             speaking: false,
                         });
                     }
@@ -326,7 +326,7 @@ fn try_connect(
                     debug!("VOICE_STATE_DELETE data={}", v["data"]);
                     if let Some(uid) = v["data"]["user"]["id"].as_str() {
                         let _ = tx.send(DiscordEvent::UserLeft {
-                            user_id: uid.to_string(),
+                            user_id: uid.into(),
                         });
                     }
                 } else if evt == "ERROR" {
