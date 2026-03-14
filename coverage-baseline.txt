@@ -1,0 +1,4 @@
+# Coverage baseline - update this after each intentional coverage improvement
+# Format: coverage_percentage (float, e.g., 34.08)
+# Run: cargo tarpaulin --out Json && jq '.coverage' tarpaulin-report.json
+34.08

@@ -57,6 +57,7 @@ impl ParticipantStateBuilder {
     }
 
     /// Create a new builder with minimal required fields.
+    #[allow(dead_code)]
     pub fn new(user_id: impl Into<String>, display_name: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
@@ -74,16 +75,19 @@ impl ParticipantStateBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn muted(mut self, muted: bool) -> Self {
         self.muted = muted;
         self
     }
 
+    #[allow(dead_code)]
     pub fn deafened(mut self, deafened: bool) -> Self {
         self.deafened = deafened;
         self
     }
 
+    #[allow(dead_code)]
     pub fn leaving(mut self, leaving: bool) -> Self {
         self.leaving = leaving;
         self
@@ -1339,7 +1343,7 @@ mod tests_discord_events {
             deafened: false,
         };
         let event = crate::discord::DiscordEvent::UserJoined(discord_p);
-        
+
         // Check that this event would set in_channel
         // (We can't easily create a full App here, but we document the expected behavior)
         match event {

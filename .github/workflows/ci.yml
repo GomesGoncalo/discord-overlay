@@ -50,3 +50,6 @@ jobs:
 
       - name: Test
         run: RUST_TEST_THREADS=1 cargo test --verbose
+
+      - name: Format check (cargo fmt)
+        run: cargo fmt -- --check

@@ -750,7 +750,7 @@ fn parse_voice_state(vs: &serde_json::Value) -> Participant {
         .get_str_option("username")
         .unwrap_or_else(|| "?".to_string());
 
-    ParticipantBuilder::new(&user.get_string("id"), &username)
+    ParticipantBuilder::new(user.get_string("id"), username)
         .nick(vs.get_str_option("nick"))
         .avatar_hash(user.get_str_option("avatar"))
         .muted(self_mute || server_mute)
@@ -1835,7 +1835,7 @@ mod tests_extra {
 
     #[test]
     fn is_timeout_other_error() {
-        let e = io::Error::new(io::ErrorKind::Other, "test");
+        let e = io::Error::other("test");
         assert!(!is_timeout(&e));
     }
 
@@ -1891,6 +1891,6 @@ mod tests_extra {
         });
         let (events, _avatars, _sub, _g) = process_frame_events(&v, "local", "me", None);
         // Should handle gracefully
-        assert!(events.is_empty() || events.len() > 0); // Just check it doesn't panic
+        assert!(!events.is_empty() || events.is_empty()); // Just check it doesn't panic
     }
 }
