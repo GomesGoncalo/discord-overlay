@@ -718,9 +718,46 @@ mod tests {
     }
 
     #[test]
+    fn smoothstep_edge_cases() {
+        // Below range
+        assert!(smoothstep(0.5, 1.0, 0.0) == 0.0);
+
+        // Above range
+        assert!(smoothstep(0.0, 0.5, 1.0) == 1.0);
+
+        // Zero-width range (edge0 == edge1 causes division by zero, results in NaN or inf)
+        let _result = smoothstep(0.5, 0.5, 0.5);
+        // Don't test this case - it's undefined behavior with division by zero
+
+        // Negative values
+        let result = smoothstep(-1.0, 1.0, 0.0);
+        assert!((result - 0.5).abs() < 1e-6);
+
+        // Larger range
+        let result = smoothstep(0.0, 100.0, 50.0);
+        assert!((result - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
     fn sdf_rrect_center_inside() {
         let d = sdf_rrect(0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.05);
         assert!(d < 0.0);
+    }
+
+    #[test]
+    fn sdf_rrect_outside() {
+        // Point far outside should have positive distance
+        let d = sdf_rrect(1.0, 1.0, 0.0, 0.0, 0.1, 0.1, 0.05);
+        assert!(d > 0.0);
+    }
+
+    #[test]
+    fn sdf_rrect_on_boundary() {
+        // Points on/near boundary should transition from negative to positive
+        let inside = sdf_rrect(0.0, 0.05, 0.0, 0.0, 0.1, 0.1, 0.01);
+        let outside = sdf_rrect(0.0, 0.15, 0.0, 0.0, 0.1, 0.1, 0.01);
+        assert!(inside < 0.0);
+        assert!(outside > 0.0);
     }
 
     #[test]
@@ -732,11 +769,57 @@ mod tests {
     }
 
     #[test]
+    fn sdf_arc_top_and_bottom() {
+        // Test both top (bottom=false) and bottom (bottom=true) variants
+        let top = sdf_arc(0.0, 0.0, 0.0, 0.0, 0.2, 0.02, false);
+        let bottom = sdf_arc(0.0, 0.0, 0.0, 0.0, 0.2, 0.02, true);
+        assert!(top.is_finite());
+        assert!(bottom.is_finite());
+    }
+
+    #[test]
+    fn sdf_arc_at_different_radii() {
+        for r in [0.1, 0.2, 0.5, 1.0].iter() {
+            let d = sdf_arc(0.0, 0.0, 0.0, 0.0, *r, 0.05, true);
+            assert!(d.is_finite(), "sdf_arc should be finite for radius {}", r);
+        }
+    }
+
+    #[test]
     fn rasterize_alpha_all() {
         let buf = rasterize(8, |_px, _py| -10.0);
         assert_eq!(buf.len(), (8 * 8 * 4) as usize);
         for i in 0..(8 * 8) {
             assert!(buf[i * 4 + 3] >= 250);
+        }
+    }
+
+    #[test]
+    fn rasterize_varying_distances() {
+        // Test rasterization with varying SDF distances
+        let buf = rasterize(4, |px, py| {
+            let dx = px - 0.5;
+            let dy = py - 0.5;
+            (dx * dx + dy * dy).sqrt() - 0.2
+        });
+        assert_eq!(buf.len(), (4 * 4 * 4) as usize);
+
+        // Verify we have some variation in alpha values
+        let alphas: Vec<u8> = (0..4 * 4).map(|i| buf[i * 4 + 3]).collect();
+
+        // Should have at least some non-maximum values
+        assert!(alphas.iter().any(|&a| a < 255));
+    }
+
+    #[test]
+    fn rasterize_different_sizes() {
+        for size in [4, 8, 16, 32].iter() {
+            let buf = rasterize(*size, |_px, _py| -1.0);
+            assert_eq!(buf.len(), (*size * *size * 4) as usize);
+            // All pixels should have full alpha for negative distance
+            for i in 0..*size as usize * *size as usize {
+                assert!(buf[i * 4 + 3] > 200);
+            }
         }
     }
 
@@ -754,10 +837,64 @@ mod tests {
     }
 
     #[test]
+    fn icons_have_alpha() {
+        for (icon_fn, name) in [
+            (icon_mic as fn(u32) -> Vec<u8>, "mic"),
+            (icon_headphone, "headphone"),
+            (icon_strikeout, "strikeout"),
+        ] {
+            let buf = icon_fn(16);
+            // Icons should have some pixel data (not all zeros)
+            assert!(
+                buf.iter().any(|&b| b != 0),
+                "{} icon should have non-zero pixels",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn icons_consistent_size() {
+        for size in [8, 16, 32].iter() {
+            let m = icon_mic(*size);
+            let h = icon_headphone(*size);
+            let s = icon_strikeout(*size);
+            let expected_len = (*size * *size * 4) as usize;
+            assert_eq!(m.len(), expected_len);
+            assert_eq!(h.len(), expected_len);
+            assert_eq!(s.len(), expected_len);
+        }
+    }
+
+    #[test]
     fn render_text_texture_with_system_font_optional() {
         if let Some(font) = load_system_font() {
             let (pixels, w, h) = render_text_texture(&font, "Hello", 12.0);
             assert!(w > 0 && h > 0);
+            assert_eq!(pixels.len(), (w * h * 4) as usize);
+        }
+    }
+
+    #[test]
+    fn render_text_texture_different_sizes() {
+        if let Some(font) = load_system_font() {
+            for size in [8.0, 12.0, 16.0, 24.0].iter() {
+                let (pixels, w, h) = render_text_texture(&font, "Test", *size);
+                assert!(w > 0 && h > 0);
+                assert_eq!(pixels.len(), (w * h * 4) as usize);
+                // Larger font size should generally produce larger texture
+                assert!(w > 4);
+                assert!(h > 4);
+            }
+        }
+    }
+
+    #[test]
+    fn render_text_texture_empty_string() {
+        if let Some(font) = load_system_font() {
+            let (pixels, w, h) = render_text_texture(&font, "", 12.0);
+            // Empty string may produce minimal texture or 1x1
+            assert!(w >= 1 && h >= 1);
             assert_eq!(pixels.len(), (w * h * 4) as usize);
         }
     }

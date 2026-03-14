@@ -48,12 +48,14 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn avatar_base_url_default() {
         std::env::remove_var("HYPR_AVATAR_BASE_URL");
         assert_eq!(base_url(), "https://cdn.discordapp.com/avatars");
     }
 
     #[test]
+    #[serial_test::serial]
     fn avatar_base_url_env_override() {
         std::env::set_var("HYPR_AVATAR_BASE_URL", "http://localhost:8000");
         assert_eq!(base_url(), "http://localhost:8000");
