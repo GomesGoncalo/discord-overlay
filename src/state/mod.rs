@@ -310,13 +310,7 @@ impl App {
                 self.scroll_offset = 0;
                 delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.last_scroll_state = (usize::MAX, usize::MAX);
-                let extra = if self.participants.len() > self.max_visible_rows {
-                    20
-                } else {
-                    0
-                };
-                let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
-                self.resize_overlay(new_h);
+                self.resize_overlay(self.compute_overlay_height());
                 if self.compact {
                     self.apply_compact_resize();
                 }
@@ -342,13 +336,7 @@ impl App {
                 self.in_channel = true;
                 self.make_name_texture(&uid, &name);
                 self.ensure_initial_texture(&uid, &name);
-                let extra = if self.participants.len() > self.max_visible_rows {
-                    20
-                } else {
-                    0
-                };
-                let new_h = 64 + self.visible_row_count() as u32 * 48 + extra;
-                self.resize_overlay(new_h);
+                self.resize_overlay(self.compute_overlay_height());
                 if self.compact {
                     self.apply_compact_resize();
                 }
@@ -440,6 +428,19 @@ impl App {
                 true
             }
         }
+    }
+
+    /// Compute overlay height based on participant count.
+    /// Height = control bar (64px) + rows (48px each) + scroll indicator (20px if needed).
+    pub fn compute_overlay_height(&self) -> u32 {
+        let visible_rows = self.visible_row_count() as u32;
+        let row_height = 48;
+        let scroll_height = if self.participants.len() > self.max_visible_rows {
+            20
+        } else {
+            0
+        };
+        64 + visible_rows * row_height + scroll_height
     }
 
     /// Draw the header section (drag handle, guild/channel names, timer).
