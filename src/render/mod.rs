@@ -1,5 +1,4 @@
 #[cfg(not(test))]
-#[cfg(not(test))]
 use glow::HasContext;
 #[cfg(not(test))]
 use khronos_egl as egl;
@@ -102,60 +101,16 @@ fn icon_strikeout(size: u32) -> Vec<u8> {
     buf
 }
 
-// ─── EGL + GL context ────────────────────────────────────────────────────────
+// ─── EGL + GL context ───────────────────────────────────────────────────────-
 
-#[cfg(not(test))]
-pub unsafe fn upload_texture_wh(
-    gl: &glow::Context,
-    pixels: &[u8],
-    w: u32,
-    h: u32,
-) -> glow::NativeTexture {
-    let tex = gl.create_texture().unwrap();
-    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-    gl.tex_parameter_i32(
-        glow::TEXTURE_2D,
-        glow::TEXTURE_WRAP_S,
-        glow::CLAMP_TO_EDGE as i32,
-    );
-    gl.tex_parameter_i32(
-        glow::TEXTURE_2D,
-        glow::TEXTURE_WRAP_T,
-        glow::CLAMP_TO_EDGE as i32,
-    );
-    gl.tex_parameter_i32(
-        glow::TEXTURE_2D,
-        glow::TEXTURE_MIN_FILTER,
-        glow::LINEAR as i32,
-    );
-    gl.tex_parameter_i32(
-        glow::TEXTURE_2D,
-        glow::TEXTURE_MAG_FILTER,
-        glow::LINEAR as i32,
-    );
-    gl.tex_image_2d(
-        glow::TEXTURE_2D,
-        0,
-        glow::RGBA as i32,
-        w as i32,
-        h as i32,
-        0,
-        glow::RGBA,
-        glow::UNSIGNED_BYTE,
-        glow::PixelUnpackData::Slice(Some(pixels)),
-    );
-    tex
-}
-
-/// Upload a square RGBA pixel buffer.
-#[cfg(not(test))]
-unsafe fn upload_texture(gl: &glow::Context, pixels: &[u8], size: u32) -> glow::NativeTexture {
-    upload_texture_wh(gl, pixels, size, size)
-}
+// GL-specific texture upload helpers live in render::textures (extracted).
 
 pub mod text;
+pub mod textures;
 
 pub use text::{load_system_font, render_text_texture};
+#[cfg(not(test))]
+pub use textures::{upload_texture, upload_texture_wh};
 
 #[cfg(test)]
 mod tests {
