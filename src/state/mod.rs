@@ -434,13 +434,12 @@ impl App {
     /// Height = control bar (64px) + rows (48px each) + scroll indicator (20px if needed).
     pub fn compute_overlay_height(&self) -> u32 {
         let visible_rows = self.visible_row_count() as u32;
-        let row_height = 48;
         let scroll_height = if self.participants.len() > self.max_visible_rows {
             20
         } else {
             0
         };
-        64 + visible_rows * row_height + scroll_height
+        64 + visible_rows * 48 + scroll_height
     }
 
     /// Draw the header section (drag handle, guild/channel names, timer).
