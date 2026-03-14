@@ -147,12 +147,7 @@ fn main() {
                     // Clamp scroll offset when participants are removed
                     let max_offset = app.participants.len().saturating_sub(app.max_visible_rows);
                     app.scroll_offset = app.scroll_offset.min(max_offset);
-                    let extra = if app.participants.len() > app.max_visible_rows {
-                        20
-                    } else {
-                        0
-                    };
-                    let new_h = 64 + app.visible_row_count() as u32 * 48 + extra;
+                    let new_h = app.compute_overlay_height();
                     app.resize_overlay(new_h);
                     if app.compact {
                         app.apply_compact_resize();
