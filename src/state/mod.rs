@@ -826,11 +826,15 @@ impl App {
         let hp_tex = self.egl.tex_headphone();
         let strike_tex = self.egl.tex_strikeout();
 
-        // Mute icon on mute button
+        // Compute icon sizes (fit the smaller of the button width/height) and center
+        // them inside the button rect to avoid overflow when button height < width.
+        let mute_icon_size = ((bw2 as f32).min(bh2 as f32) - 2.0 * pad).max(0.0);
+        let mute_icon_x = bx2 as f32 + (bw2 as f32 - mute_icon_size) * 0.5;
+        let mute_icon_y = by2 as f32 + (bh2 as f32 - mute_icon_size) * 0.5;
         let mute_icon_params = StatusIconParams {
-            x: bx2 as f32 + pad,
-            y: by2 as f32 + pad,
-            size: bw2 as f32 - 2.0 * pad,
+            x: mute_icon_x,
+            y: mute_icon_y,
+            size: mute_icon_size,
             tex: mic_tex,
             strike_tex,
             is_active: effectively_muted,
@@ -840,10 +844,13 @@ impl App {
         self.draw_icon_with_strikeout(&mute_icon_params, sw, sh);
 
         // Deafen icon on deafen button
+        let deaf_icon_size = ((bw as f32).min(bh as f32) - 2.0 * pad).max(0.0);
+        let deaf_icon_x = bx as f32 + (bw as f32 - deaf_icon_size) * 0.5;
+        let deaf_icon_y = by as f32 + (bh as f32 - deaf_icon_size) * 0.5;
         let deaf_icon_params = StatusIconParams {
-            x: bx as f32 + pad,
-            y: by as f32 + pad,
-            size: bw as f32 - 2.0 * pad,
+            x: deaf_icon_x,
+            y: deaf_icon_y,
+            size: deaf_icon_size,
             tex: hp_tex,
             strike_tex,
             is_active: self.discord_deaf,
