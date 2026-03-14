@@ -125,7 +125,7 @@ fn rasterize(size: u32, sdf_fn: impl Fn(f32, f32) -> f32) -> Vec<u8> {
 
 fn icon_mic(size: u32) -> Vec<u8> {
     rasterize(size, |px, py| {
-        let body = sdf_rrect(px, py, 0.0, 0.08, 0.12, 0.22, 0.12);
+        let body = sdf_rrect(px, py, 0.0, 0.0, 0.12, 0.22, 0.12);
         let stand = sdf_arc(px, py, 0.0, -0.08, 0.28, 0.03, true);
         let stem = sdf_rrect(px, py, 0.0, -0.36, 0.03, 0.055, 0.03);
         let base = sdf_rrect(px, py, 0.0, -0.42, 0.16, 0.03, 0.03);
@@ -136,8 +136,8 @@ fn icon_mic(size: u32) -> Vec<u8> {
 fn icon_headphone(size: u32) -> Vec<u8> {
     rasterize(size, |px, py| {
         let band = sdf_arc(px, py, 0.0, 0.0, 0.32, 0.04, false);
-        let left = sdf_rrect(px, py, -0.32, -0.16, 0.09, 0.15, 0.07);
-        let right = sdf_rrect(px, py, 0.32, -0.16, 0.09, 0.15, 0.07);
+        let left = sdf_rrect(px, py, -0.32, 0.0, 0.09, 0.15, 0.07);
+        let right = sdf_rrect(px, py, 0.32, 0.0, 0.09, 0.15, 0.07);
         band.min(left).min(right)
     })
 }
