@@ -9,6 +9,7 @@ mod config;
 mod discord;
 mod handlers;
 mod render;
+mod render_error;
 mod state;
 
 use std::sync::mpsc;

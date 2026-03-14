@@ -442,6 +442,66 @@ impl App {
         }
     }
 
+    /// Draw the header section (drag handle, guild/channel names, timer).
+    fn draw_header(&mut self, op: f32, sw: f32, sh: f32) {
+        let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
+
+        // Drag handle — blue pill
+        self.egl.draw_rect(
+            hx as f32,
+            hy as f32,
+            hw as f32,
+            hh as f32,
+            sw,
+            sh,
+            [0.25, 0.45, 1.0, 0.75 * op],
+            (hw as f32 * 0.5).min(10.0),
+        );
+
+        // Left-side info: guild name (top), channel name (middle), timer (bottom)
+        let text_x = (hx + hw) as f32 + 8.0;
+        if let Some((tex, tw, th)) = self.guild_name_tex {
+            self.egl
+                .draw_icon(text_x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
+        }
+        if let Some((tex, tw, th)) = self.channel_name_tex {
+            self.egl
+                .draw_icon(text_x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
+        }
+        if let Some((tex, tw, th)) = self.timer_tex {
+            self.egl
+                .draw_icon(text_x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
+        }
+    }
+
+    /// Draw scroll indicator (if needed).
+    fn draw_scroll_indicator(&mut self, op: f32, sw: f32, sh: f32) {
+        if self.participants.len() <= self.max_visible_rows {
+            return;
+        }
+
+        const ROW_HEIGHT: f32 = 48.0;
+        let indicator_y = 64.0 + self.visible_row_count() as f32 * ROW_HEIGHT;
+
+        self.egl.draw_rect(
+            0.0,
+            indicator_y,
+            sw,
+            20.0,
+            sw,
+            sh,
+            [0.15, 0.15, 0.18, op * 0.9],
+            0.0,
+        );
+
+        if let Some((tex, tw, th)) = self.scroll_indicator_tex {
+            let tx = (sw - tw as f32) * 0.5;
+            let ty = indicator_y + (20.0 - th as f32) * 0.5;
+            self.egl
+                .draw_icon(tx, ty, tw as f32, th as f32, sw, sh, tex, op * 0.7);
+        }
+    }
+
     pub fn draw(&mut self) {
         let op = self.opacity * self.idle_alpha;
         debug!(
@@ -470,38 +530,11 @@ impl App {
         self.egl.clear(glow::COLOR_BUFFER_BIT);
         self.egl.use_main_program();
 
-        // Drag handle — blue pill
-        self.egl.draw_rect(
-            hx as f32,
-            hy as f32,
-            hw as f32,
-            hh as f32,
-            sw,
-            sh,
-            [0.25, 0.45, 1.0, 0.75 * op],
-            (hw as f32 * 0.5).min(10.0),
-        );
+        // Draw header (drag handle, guild/channel names, timer)
+        self.draw_header(op, sw, sh);
 
-        // Left-side info: guild name (top), channel name (middle), timer (bottom)
-        // Positioned to the right of the drag handle (hx + hw + 8px gap)
-        let text_x = (hx + hw) as f32 + 8.0;
-        if let Some((tex, tw, th)) = self.guild_name_tex {
-            self.egl
-                .draw_icon(text_x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
-        }
-        if let Some((tex, tw, th)) = self.channel_name_tex {
-            self.egl
-                .draw_icon(text_x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
-        }
-        if let Some((tex, tw, th)) = self.timer_tex {
-            self.egl
-                .draw_icon(text_x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
-        }
-
-        // Mute button background
-        // When deafened, mic is implicitly muted too
+        // Draw mute/deafen buttons with proper colors and icons
         let effectively_muted = self.discord_mute || self.discord_deaf;
-        // PTT mode: dim the mic button when not transmitting
         let mic_alpha = if self.ptt_mode && !self.ptt_active && !effectively_muted {
             op * 0.35
         } else {
@@ -516,7 +549,6 @@ impl App {
             bx2 as f32, by2 as f32, bw2 as f32, bh2 as f32, sw, sh, mute_base, 10.0,
         );
 
-        // Deafen button background
         let deaf_base = if self.discord_deaf {
             [0.75, 0.15, 0.15, 0.88 * op]
         } else {
@@ -819,26 +851,8 @@ impl App {
             }
         }
 
-        // Scroll indicator strip (only when there are more participants than visible rows)
-        if self.participants.len() > self.max_visible_rows {
-            let indicator_y = 64.0 + self.visible_row_count() as f32 * row_h as f32;
-            self.egl.draw_rect(
-                0.0,
-                indicator_y,
-                sw,
-                20.0,
-                sw,
-                sh,
-                [0.15, 0.15, 0.18, op * 0.9],
-                0.0,
-            );
-            if let Some((tex, tw, th)) = self.scroll_indicator_tex {
-                let tx = (sw - tw as f32) * 0.5;
-                let ty = indicator_y + (20.0 - th as f32) * 0.5;
-                self.egl
-                    .draw_icon(tx, ty, tw as f32, th as f32, sw, sh, tex, op * 0.7);
-            }
-        }
+        // Draw scroll indicator (if needed)
+        self.draw_scroll_indicator(op, sw, sh);
 
         debug!("DRAW: Calling egl.swap()");
         self.egl.swap();
