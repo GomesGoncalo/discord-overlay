@@ -83,6 +83,17 @@ pub struct App {
     pub self_user_id: String,
 }
 
+/// Parameters for rendering a single participant row.
+struct ParticipantRowParams {
+    row_y_f: f32,
+    anim: f32,
+    muted: bool,
+    deafened: bool,
+    speaking: bool,
+    user_id: String,
+    display_name: String,
+}
+
 // ─── App methods ─────────────────────────────────────────────────────────────
 
 impl App {
@@ -502,6 +513,202 @@ impl App {
         }
     }
 
+    /// Draw a single participant row (avatar, name, status icons, etc.).
+    ///
+    /// Handles: row background, speaking ring, avatar/initials, name text,
+    /// mute/deaf icons with optional background highlights.
+    fn draw_participant_row(
+        &mut self,
+        params: &ParticipantRowParams,
+        op: f32,
+        sw: f32,
+        sh: f32,
+        row_h: u32,
+    ) {
+        let row_anim_op = op * params.anim;
+
+        // Row background
+        self.egl.draw_rect(
+            4.0,
+            params.row_y_f + 4.0,
+            sw - 8.0,
+            row_h as f32 - 8.0,
+            sw,
+            sh,
+            [
+                self.config.bg_color[0],
+                self.config.bg_color[1],
+                self.config.bg_color[2],
+                0.6 * row_anim_op,
+            ],
+            8.0,
+        );
+
+        // Avatar positioning
+        let av_size = 32f32;
+        let av_x = 12f32;
+        let av_y = params.row_y_f + (row_h as f32 - av_size) * 0.5;
+
+        // Speaking ring — active while speaking_until is in the future
+        if params.speaking {
+            let ring = 3.0f32;
+            self.egl.draw_rect(
+                av_x - ring,
+                av_y - ring,
+                av_size + ring * 2.0,
+                av_size + ring * 2.0,
+                sw,
+                sh,
+                [
+                    self.config.speaking_color[0],
+                    self.config.speaking_color[1],
+                    self.config.speaking_color[2],
+                    0.9 * row_anim_op,
+                ],
+                (av_size + ring * 2.0) * 0.5,
+            );
+        }
+
+        // Avatar or placeholder
+        if let Some(&tex) = self.avatar_textures.get(&params.user_id) {
+            let desaturate = if params.deafened { 1.0_f32 } else { 0.0 };
+            self.egl
+                .draw_avatar(av_x, av_y, av_size, sw, sh, tex, row_anim_op, desaturate);
+        } else {
+            let hue = params
+                .user_id
+                .bytes()
+                .fold(0u32, |a, b| a.wrapping_add(b as u32));
+            let colors = [
+                [0.6f32, 0.2, 0.8],
+                [0.2, 0.6, 0.8],
+                [0.8, 0.4, 0.2],
+                [0.3, 0.7, 0.4],
+            ];
+            let c = colors[(hue % 4) as usize];
+            self.egl.draw_rect(
+                av_x,
+                av_y,
+                av_size,
+                av_size,
+                sw,
+                sh,
+                [c[0], c[1], c[2], 0.85 * row_anim_op],
+                av_size * 0.5,
+            );
+            // Initial letter centered on placeholder circle
+            self.ensure_initial_texture(&params.user_id, &params.display_name);
+            let initial_data = self
+                .initials_textures
+                .get(&params.user_id)
+                .map(|&(t, w, h)| (t, w, h));
+            if let Some((tex, tw, th)) = initial_data {
+                let ix = av_x + (av_size - tw as f32) * 0.5;
+                let iy = av_y + (av_size - th as f32) * 0.5;
+                self.egl
+                    .draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, row_anim_op);
+            }
+        }
+
+        // Name text
+        let icon_sz = 16.0f32;
+        let icon_gap = 4.0f32;
+        let icons_w = icon_sz * 2.0 + icon_gap + 8.0;
+        let name_x = av_x + av_size + 8.0;
+        let name_w_max = sw - name_x - icons_w;
+        if let Some(&(tex, tw, th)) = self.name_textures.get(&params.user_id) {
+            let draw_w = (tw as f32).min(name_w_max);
+            let draw_h = th as f32;
+            let name_y = params.row_y_f + (row_h as f32 - draw_h) * 0.5;
+            self.egl
+                .draw_icon(name_x, name_y, draw_w, draw_h, sw, sh, tex, row_anim_op);
+        }
+
+        // Per-participant mute/deaf icons (right side of row)
+        let mic_tex = self.egl.tex_mic();
+        let hp_tex = self.egl.tex_headphone();
+        let strike_tex = self.egl.tex_strikeout();
+        let icon_y = params.row_y_f + (row_h as f32 - icon_sz) * 0.5;
+        let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
+        let hp_x = sw - icon_sz - 8.0;
+
+        // Mute icon
+        let mic_op = if params.muted {
+            row_anim_op * 0.9
+        } else {
+            row_anim_op * 0.35
+        };
+        if params.muted {
+            self.egl.draw_rect(
+                mic_x - 2.0,
+                icon_y - 2.0,
+                icon_sz + 4.0,
+                icon_sz + 4.0,
+                sw,
+                sh,
+                [
+                    self.config.muted_color[0],
+                    self.config.muted_color[1],
+                    self.config.muted_color[2],
+                    0.6 * row_anim_op,
+                ],
+                4.0,
+            );
+        }
+        self.egl
+            .draw_icon(mic_x, icon_y, icon_sz, icon_sz, sw, sh, mic_tex, mic_op);
+        if params.muted {
+            self.egl.draw_icon(
+                mic_x,
+                icon_y,
+                icon_sz,
+                icon_sz,
+                sw,
+                sh,
+                strike_tex,
+                row_anim_op * 0.85,
+            );
+        }
+
+        // Deafen icon
+        let hp_op = if params.deafened {
+            row_anim_op * 0.9
+        } else {
+            row_anim_op * 0.35
+        };
+        if params.deafened {
+            self.egl.draw_rect(
+                hp_x - 2.0,
+                icon_y - 2.0,
+                icon_sz + 4.0,
+                icon_sz + 4.0,
+                sw,
+                sh,
+                [
+                    self.config.muted_color[0],
+                    self.config.muted_color[1],
+                    self.config.muted_color[2],
+                    0.6 * row_anim_op,
+                ],
+                4.0,
+            );
+        }
+        self.egl
+            .draw_icon(hp_x, icon_y, icon_sz, icon_sz, sw, sh, hp_tex, hp_op);
+        if params.deafened {
+            self.egl.draw_icon(
+                hp_x,
+                icon_y,
+                icon_sz,
+                icon_sz,
+                sw,
+                sh,
+                strike_tex,
+                row_anim_op * 0.85,
+            );
+        }
+    }
+
     pub fn draw(&mut self) {
         let op = self.opacity * self.idle_alpha;
         debug!(
@@ -675,180 +882,17 @@ impl App {
             let _ = abs_idx; // abs_idx available for future use; slot drives layout
             let slide_offset = (1.0 - anim) * row_h as f32 * 0.35;
             let row_y_f = 64.0_f32 + slot as f32 * row_h as f32 + slide_offset;
-            let row_anim_op = op * anim;
 
-            let av_size = 32f32;
-            let av_x = 12f32;
-            let av_y = row_y_f + (row_h as f32 - av_size) * 0.5;
-
-            // Semi-transparent row background
-            self.egl.draw_rect(
-                4.0,
-                row_y_f + 4.0,
-                sw - 8.0,
-                row_h as f32 - 8.0,
-                sw,
-                sh,
-                [
-                    self.config.bg_color[0],
-                    self.config.bg_color[1],
-                    self.config.bg_color[2],
-                    0.6 * row_anim_op,
-                ],
-                8.0,
-            );
-
-            // Speaking ring — active while speaking_until is in the future
-            if *speaking {
-                let ring = 3.0f32;
-                self.egl.draw_rect(
-                    av_x - ring,
-                    av_y - ring,
-                    av_size + ring * 2.0,
-                    av_size + ring * 2.0,
-                    sw,
-                    sh,
-                    [
-                        self.config.speaking_color[0],
-                        self.config.speaking_color[1],
-                        self.config.speaking_color[2],
-                        0.9 * row_anim_op,
-                    ],
-                    (av_size + ring * 2.0) * 0.5,
-                );
-            }
-
-            // Avatar
-            if let Some(&tex) = self.avatar_textures.get(user_id) {
-                let desaturate = if *deafened { 1.0_f32 } else { 0.0 };
-                self.egl
-                    .draw_avatar(av_x, av_y, av_size, sw, sh, tex, row_anim_op, desaturate);
-            } else {
-                let hue = user_id.bytes().fold(0u32, |a, b| a.wrapping_add(b as u32));
-                let colors = [
-                    [0.6f32, 0.2, 0.8],
-                    [0.2, 0.6, 0.8],
-                    [0.8, 0.4, 0.2],
-                    [0.3, 0.7, 0.4],
-                ];
-                let c = colors[(hue % 4) as usize];
-                self.egl.draw_rect(
-                    av_x,
-                    av_y,
-                    av_size,
-                    av_size,
-                    sw,
-                    sh,
-                    [c[0], c[1], c[2], 0.85 * row_anim_op],
-                    av_size * 0.5,
-                );
-                // Initial letter centered on placeholder circle
-                self.ensure_initial_texture(user_id, display_name);
-                let initial_data = self
-                    .initials_textures
-                    .get(user_id)
-                    .map(|&(t, w, h)| (t, w, h));
-                if let Some((tex, tw, th)) = initial_data {
-                    let ix = av_x + (av_size - tw as f32) * 0.5;
-                    let iy = av_y + (av_size - th as f32) * 0.5;
-                    self.egl
-                        .draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, row_anim_op);
-                }
-            }
-
-            // Name text
-            let icon_sz = 16.0f32;
-            let icon_gap = 4.0f32;
-            let icons_w = icon_sz * 2.0 + icon_gap + 8.0;
-            let name_x = av_x + av_size + 8.0;
-            let name_w_max = sw - name_x - icons_w;
-            if let Some(&(tex, tw, th)) = self.name_textures.get(user_id) {
-                let draw_w = (tw as f32).min(name_w_max);
-                let draw_h = th as f32;
-                let name_y = row_y_f + (row_h as f32 - draw_h) * 0.5;
-                self.egl
-                    .draw_icon(name_x, name_y, draw_w, draw_h, sw, sh, tex, row_anim_op);
-            }
-
-            // Per-participant mute/deaf icons (right side of row)
-            let mic_tex = self.egl.tex_mic();
-            let hp_tex = self.egl.tex_headphone();
-            let strike_tex = self.egl.tex_strikeout();
-            let icon_y = row_y_f + (row_h as f32 - icon_sz) * 0.5;
-            let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
-            let hp_x = sw - icon_sz - 8.0;
-            let mic_op = if *muted {
-                row_anim_op * 0.9
-            } else {
-                row_anim_op * 0.35
+            let params = ParticipantRowParams {
+                row_y_f,
+                anim: *anim,
+                muted: *muted,
+                deafened: *deafened,
+                speaking: *speaking,
+                user_id: user_id.clone(),
+                display_name: display_name.clone(),
             };
-            if *muted {
-                self.egl.draw_rect(
-                    mic_x - 2.0,
-                    icon_y - 2.0,
-                    icon_sz + 4.0,
-                    icon_sz + 4.0,
-                    sw,
-                    sh,
-                    [
-                        self.config.muted_color[0],
-                        self.config.muted_color[1],
-                        self.config.muted_color[2],
-                        0.6 * row_anim_op,
-                    ],
-                    4.0,
-                );
-            }
-            self.egl
-                .draw_icon(mic_x, icon_y, icon_sz, icon_sz, sw, sh, mic_tex, mic_op);
-            if *muted {
-                self.egl.draw_icon(
-                    mic_x,
-                    icon_y,
-                    icon_sz,
-                    icon_sz,
-                    sw,
-                    sh,
-                    strike_tex,
-                    row_anim_op * 0.85,
-                );
-            }
-            let hp_op = if *deafened {
-                row_anim_op * 0.9
-            } else {
-                row_anim_op * 0.35
-            };
-            if *deafened {
-                self.egl.draw_rect(
-                    hp_x - 2.0,
-                    icon_y - 2.0,
-                    icon_sz + 4.0,
-                    icon_sz + 4.0,
-                    sw,
-                    sh,
-                    [
-                        self.config.muted_color[0],
-                        self.config.muted_color[1],
-                        self.config.muted_color[2],
-                        0.6 * row_anim_op,
-                    ],
-                    4.0,
-                );
-            }
-            self.egl
-                .draw_icon(hp_x, icon_y, icon_sz, icon_sz, sw, sh, hp_tex, hp_op);
-            if *deafened {
-                self.egl.draw_icon(
-                    hp_x,
-                    icon_y,
-                    icon_sz,
-                    icon_sz,
-                    sw,
-                    sh,
-                    strike_tex,
-                    row_anim_op * 0.85,
-                );
-            }
+            self.draw_participant_row(&params, op, sw, sh, row_h);
         }
 
         // Draw scroll indicator (if needed)
