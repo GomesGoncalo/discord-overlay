@@ -839,6 +839,44 @@ fn run_client(
     }
 }
 
+/// Subscribe to voice settings and channel changes.
+fn subscribe_initial(stream: &mut UnixStream) {
+    send_cmd(
+        stream,
+        json!({
+            "cmd": "GET_VOICE_SETTINGS",
+            "args": {},
+            "nonce": "gvs"
+        }),
+    );
+    send_cmd(
+        stream,
+        json!({
+            "cmd":  "SUBSCRIBE",
+            "evt":  "VOICE_SETTINGS_UPDATE",
+            "args": {},
+            "nonce": "sub_vsu"
+        }),
+    );
+    send_cmd(
+        stream,
+        json!({
+            "cmd": "SUBSCRIBE",
+            "evt": "VOICE_CHANNEL_SELECT",
+            "args": {},
+            "nonce": "sub_vcs"
+        }),
+    );
+    send_cmd(
+        stream,
+        json!({
+            "cmd": "GET_SELECTED_VOICE_CHANNEL",
+            "args": {},
+            "nonce": "gvsc"
+        }),
+    );
+}
+
 fn try_connect(
     cfg: &Config,
     tx: &calloop::channel::Sender<DiscordEvent>,
@@ -889,41 +927,7 @@ fn try_connect(
     });
 
     // Get current voice settings + subscribe to updates
-    send_cmd(
-        &mut stream,
-        json!({
-            "cmd": "GET_VOICE_SETTINGS",
-            "args": {},
-            "nonce": "gvs"
-        }),
-    );
-    send_cmd(
-        &mut stream,
-        json!({
-            "cmd":  "SUBSCRIBE",
-            "evt":  "VOICE_SETTINGS_UPDATE",
-            "args": {},
-            "nonce": "sub_vsu"
-        }),
-    );
-    // Subscribe to voice channel changes and get current voice channel
-    send_cmd(
-        &mut stream,
-        json!({
-            "cmd": "SUBSCRIBE",
-            "evt": "VOICE_CHANNEL_SELECT",
-            "args": {},
-            "nonce": "sub_vcs"
-        }),
-    );
-    send_cmd(
-        &mut stream,
-        json!({
-            "cmd": "GET_SELECTED_VOICE_CHANNEL",
-            "args": {},
-            "nonce": "gvsc"
-        }),
-    );
+    subscribe_initial(&mut stream);
 
     // Event loop
     let mut nonce: u64 = 1000;
