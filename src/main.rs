@@ -4,6 +4,7 @@
 //! Click-through everywhere else via wl_surface.set_input_region.
 //! Discord IPC: set DISCORD_CLIENT_ID + DISCORD_CLIENT_SECRET to enable.
 
+mod avatar;
 mod config;
 mod discord;
 mod handlers;

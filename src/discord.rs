@@ -18,6 +18,8 @@ use tracing::{debug, error, info, warn};
 
 use serde_json::{json, Value};
 
+use crate::avatar;
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 pub struct Config {
@@ -811,39 +813,6 @@ fn subscribe_for_channel(stream: &mut UnixStream, channel_id: &str, nonce: &mut 
     );
 }
 
-fn avatar_base_url() -> String {
-    std::env::var("HYPR_AVATAR_BASE_URL")
-        .unwrap_or_else(|_| "https://cdn.discordapp.com/avatars".to_string())
-}
-
-fn fetch_and_send_avatar(
-    user_id: String,
-    hash: String,
-    tx: calloop::channel::Sender<DiscordEvent>,
-) {
-    std::thread::spawn(move || {
-        let base = avatar_base_url();
-        let url = format!("{}/{}/{}.png?size=64", base, user_id, hash);
-        if let Ok(resp) = ureq::get(&url).call() {
-            let mut buf = Vec::new();
-            if resp.into_reader().read_to_end(&mut buf).is_ok() {
-                if let Ok(img) = image::load_from_memory(&buf) {
-                    let rgba = image::DynamicImage::from(img.to_rgba8()).flipv().to_rgba8();
-                    let (w, _h) = rgba.dimensions();
-                    let size = w;
-                    if size > 0 {
-                        let _ = tx.send(DiscordEvent::AvatarLoaded {
-                            user_id,
-                            rgba: rgba.into_raw(),
-                            size,
-                        });
-                    }
-                }
-            }
-        }
-    });
-}
-
 // ─── Main IPC loop ────────────────────────────────────────────────────────────
 
 fn run_client(
@@ -1002,7 +971,7 @@ fn try_connect(
                     || guild_id.is_some()
                 {
                     for (uid, hash) in avatars {
-                        fetch_and_send_avatar(uid, hash, tx.clone());
+                        avatar::fetch_and_send(uid, hash, tx.clone());
                     }
                     for e in events {
                         let _ = tx.send(e);
@@ -1082,7 +1051,7 @@ fn try_connect(
                         );
                         for p in &parts {
                             if let Some(hash) = &p.avatar_hash {
-                                fetch_and_send_avatar(p.user_id.clone(), hash.clone(), tx.clone());
+                                avatar::fetch_and_send(p.user_id.clone(), hash.clone(), tx.clone());
                             }
                         }
                         let _ = tx.send(DiscordEvent::VoiceParticipants {
@@ -1162,7 +1131,7 @@ fn try_connect(
                     let p = parse_voice_state(&v["data"]);
                     if !p.user_id.is_empty() {
                         if let Some(hash) = &p.avatar_hash {
-                            fetch_and_send_avatar(p.user_id.clone(), hash.clone(), tx.clone());
+                            avatar::fetch_and_send(p.user_id.clone(), hash.clone(), tx.clone());
                         }
                         let _ = tx.send(DiscordEvent::UserJoined(p));
                     }
@@ -1700,27 +1669,6 @@ mod tests_extra {
         assert!(events.is_empty());
         assert!(avatars.is_empty());
         assert!(guild.is_none());
-    }
-
-    #[test]
-    #[serial]
-    fn avatar_base_url_default() {
-        std::env::remove_var("HYPR_AVATAR_BASE_URL");
-        assert_eq!(
-            avatar_base_url(),
-            "https://cdn.discordapp.com/avatars".to_string()
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn avatar_base_url_env_override() {
-        std::env::set_var("HYPR_AVATAR_BASE_URL", "http://localhost:8000/avatars");
-        assert_eq!(
-            avatar_base_url(),
-            "http://localhost:8000/avatars".to_string()
-        );
-        std::env::remove_var("HYPR_AVATAR_BASE_URL");
     }
 
     #[test]
