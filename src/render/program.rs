@@ -6,8 +6,8 @@ use glow::HasContext;
 #[cfg(not(test))]
 /// Wrapper for the main rounded-rect shader program (holds program id + queried locations).
 pub struct MainProgram {
-    pub program: glow::NativeProgram,
-    pub locs: super::program_locations::MainProgramLocations,
+    program: glow::NativeProgram,
+    locs: super::program_locations::MainProgramLocations,
 }
 
 #[cfg(not(test))]
@@ -43,13 +43,23 @@ impl MainProgram {
     pub unsafe fn set_radius(&self, gl: &glow::Context, r: f32) {
         gl.uniform_1_f32(Some(&self.locs.loc_radius), r);
     }
+
+    /// Accessor for underlying program id.
+    pub fn id(&self) -> glow::NativeProgram {
+        self.program
+    }
+
+    /// Accessor for queried locations.
+    pub fn locs(&self) -> &super::program_locations::MainProgramLocations {
+        &self.locs
+    }
 }
 
 #[cfg(not(test))]
 /// Wrapper for simple programs that expose a single `u_opacity` uniform (icons, avatars).
 pub struct OpacityProgram {
-    pub program: glow::NativeProgram,
-    pub loc_opacity: glow::UniformLocation,
+    program: glow::NativeProgram,
+    loc_opacity: glow::UniformLocation,
 }
 
 #[cfg(not(test))]
@@ -69,5 +79,10 @@ impl OpacityProgram {
 
     pub unsafe fn set_opacity(&self, gl: &glow::Context, o: f32) {
         gl.uniform_1_f32(Some(&self.loc_opacity), o);
+    }
+
+    /// Accessor for underlying program id.
+    pub fn id(&self) -> glow::NativeProgram {
+        self.program
     }
 }
