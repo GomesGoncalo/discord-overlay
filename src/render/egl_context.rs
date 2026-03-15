@@ -196,11 +196,8 @@ impl EglContext {
         unsafe {
             // Upload verts and set attribute pointers using shared helpers
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
-            super::draw::enable_quad_attribs(
-                &self.gl,
-                self.main_prog.locs.loc_pos,
-                self.main_prog.locs.loc_local,
-            );
+            let locs = self.main_prog.locs();
+            super::draw::enable_quad_attribs(&self.gl, locs.loc_pos, locs.loc_local);
 
             self.main_prog.set_color(&self.gl, color);
             self.main_prog.set_size(&self.gl, pw, ph);
@@ -236,11 +233,8 @@ impl EglContext {
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
 
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
-            super::draw::enable_quad_attribs(
-                &self.gl,
-                self.main_prog.locs.loc_pos,
-                self.main_prog.locs.loc_local,
-            );
+            let locs = self.main_prog.locs();
+            super::draw::enable_quad_attribs(&self.gl, locs.loc_pos, locs.loc_local);
 
             self.icon_prog.set_opacity(&self.gl, opacity);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
@@ -269,16 +263,13 @@ impl EglContext {
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
 
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
-            super::draw::enable_quad_attribs(
-                &self.gl,
-                self.main_prog.locs.loc_pos,
-                self.main_prog.locs.loc_local,
-            );
+            let locs = self.main_prog.locs();
+            super::draw::enable_quad_attribs(&self.gl, locs.loc_pos, locs.loc_local);
 
             self.avatar_prog.set_opacity(&self.gl, opacity);
             let u_des = self
                 .gl
-                .get_uniform_location(self.avatar_prog.program, "u_desaturate");
+                .get_uniform_location(self.avatar_prog.id(), "u_desaturate");
             self.gl.uniform_1_f32(u_des.as_ref(), desaturate);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             self.main_prog.use_program(&self.gl);
@@ -368,9 +359,9 @@ impl Drop for EglContext {
     fn drop(&mut self) {
         unsafe {
             // Delete GL programs, VBO and textures owned by EglContext
-            self.gl.delete_program(self.main_prog.program);
-            self.gl.delete_program(self.icon_prog.program);
-            self.gl.delete_program(self.avatar_prog.program);
+            self.gl.delete_program(self.main_prog.id());
+            self.gl.delete_program(self.icon_prog.id());
+            self.gl.delete_program(self.avatar_prog.id());
             self.gl.delete_buffer(self.vbo);
             self.gl.delete_texture(self.tex_mic);
             self.gl.delete_texture(self.tex_headphone);
