@@ -15,6 +15,8 @@ const EGL_PLATFORM_WAYLAND_KHR: egl::Enum = 0x31D8;
 
 pub mod math;
 
+pub mod draw;
+
 pub use math::{rasterize, sdf_arc, sdf_rrect, smoothstep};
 
 fn icon_mic(size: u32) -> Vec<u8> {
