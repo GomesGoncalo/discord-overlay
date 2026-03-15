@@ -362,3 +362,19 @@ impl EglBackend for EglContext {
         EglContext::use_main_program(self)
     }
 }
+
+#[cfg(not(test))]
+impl Drop for EglContext {
+    fn drop(&mut self) {
+        unsafe {
+            // Delete GL programs, VBO and textures owned by EglContext
+            self.gl.delete_program(self.main_prog.program);
+            self.gl.delete_program(self.icon_prog.program);
+            self.gl.delete_program(self.avatar_prog.program);
+            self.gl.delete_buffer(self.vbo);
+            self.gl.delete_texture(self.tex_mic);
+            self.gl.delete_texture(self.tex_headphone);
+            self.gl.delete_texture(self.tex_strikeout);
+        }
+    }
+}
