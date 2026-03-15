@@ -48,3 +48,18 @@ pub unsafe fn query_opacity(
 ) -> glow::UniformLocation {
     gl.get_uniform_location(program, UNIFORM_OPACITY).unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attr_and_uniform_names() {
+        assert_eq!(ATTR_POSITION, "a_position");
+        assert_eq!(ATTR_LOCAL, "a_local");
+        assert_eq!(UNIFORM_COLOR, "u_color");
+        assert_eq!(UNIFORM_SIZE, "u_size");
+        assert_eq!(UNIFORM_RADIUS, "u_radius");
+        assert_eq!(UNIFORM_OPACITY, "u_opacity");
+    }
+}
