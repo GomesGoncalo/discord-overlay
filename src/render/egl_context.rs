@@ -34,18 +34,15 @@ pub struct EglContext {
     wl_egl: WlEglSurface,
     pub gl: glow::Context,
     // Rounded-rect shader (background fills)
-    pub program: glow::NativeProgram,
+    pub main_prog: super::program::MainProgram,
     vbo: glow::NativeBuffer,
-    main_locs: super::program_locations::MainProgramLocations,
     // Icon overlay shader + textures
-    icon_prog: glow::NativeProgram,
-    icon_loc_opacity: glow::UniformLocation,
+    icon_prog: super::program::OpacityProgram,
     pub tex_mic: glow::NativeTexture,
     pub tex_headphone: glow::NativeTexture,
     pub tex_strikeout: glow::NativeTexture,
     // Circular avatar shader
-    avatar_prog: glow::NativeProgram,
-    avatar_loc_opacity: glow::UniformLocation,
+    avatar_prog: super::program::OpacityProgram,
 }
 #[cfg(not(test))]
 impl EglContext {
@@ -144,21 +141,16 @@ impl EglContext {
         }
 
         // Compile and link the shader program
-        let program = unsafe { super::compile::compile_program(&gl, VERT_SRC, FRAG_SRC) };
-
-        // Query main program attribute/uniform locations via helper
-        let main_locs = unsafe { super::program_locations::query_main_program(&gl, program) };
+        let main_prog = unsafe { super::program::MainProgram::new(&gl, VERT_SRC, FRAG_SRC) };
         let vbo = unsafe { gl.create_buffer().unwrap() };
 
         // ── Icon overlay shader ──────────────────────────────────────────────
-        let icon_prog = unsafe { super::compile::compile_program(&gl, VERT_SRC, ICON_FRAG_SRC) };
-        let icon_loc_opacity = unsafe { super::program_locations::query_opacity(&gl, icon_prog) };
+        let icon_prog =
+            unsafe { super::program::OpacityProgram::new(&gl, VERT_SRC, ICON_FRAG_SRC) };
 
         // ── Avatar circular-clip shader ──────────────────────────────────────
         let avatar_prog =
-            unsafe { super::compile::compile_program(&gl, VERT_SRC, AVATAR_FRAG_SRC) };
-        let avatar_loc_opacity =
-            unsafe { super::program_locations::query_opacity(&gl, avatar_prog) };
+            unsafe { super::program::OpacityProgram::new(&gl, VERT_SRC, AVATAR_FRAG_SRC) };
 
         // ── Upload icon textures ─────────────────────────────────────────────
         let tex_mic = unsafe { upload_texture(&gl, &icon_mic(64), 64) };
@@ -172,16 +164,13 @@ impl EglContext {
             _egl_context: egl_context,
             wl_egl,
             gl,
-            program,
+            main_prog,
             vbo,
-            main_locs,
             icon_prog,
-            icon_loc_opacity,
             tex_mic,
             tex_headphone,
             tex_strikeout,
             avatar_prog,
-            avatar_loc_opacity,
         }
     }
 
@@ -209,21 +198,13 @@ impl EglContext {
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
             super::draw::enable_quad_attribs(
                 &self.gl,
-                self.main_locs.loc_pos,
-                self.main_locs.loc_local,
+                self.main_prog.locs.loc_pos,
+                self.main_prog.locs.loc_local,
             );
 
-            self.gl.uniform_4_f32(
-                Some(&self.main_locs.loc_color),
-                color[0],
-                color[1],
-                color[2],
-                color[3],
-            );
-            self.gl
-                .uniform_2_f32(Some(&self.main_locs.loc_size), pw, ph);
-            self.gl
-                .uniform_1_f32(Some(&self.main_locs.loc_radius), radius);
+            self.main_prog.set_color(&self.gl, color);
+            self.main_prog.set_size(&self.gl, pw, ph);
+            self.main_prog.set_radius(&self.gl, radius);
 
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
         }
@@ -250,20 +231,20 @@ impl EglContext {
     ) {
         let verts = super::draw::verts_from_pixels(px, py, pw, ph, surf_w, surf_h);
         unsafe {
-            self.gl.use_program(Some(self.icon_prog));
+            self.icon_prog.use_program(&self.gl);
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
 
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
             super::draw::enable_quad_attribs(
                 &self.gl,
-                self.main_locs.loc_pos,
-                self.main_locs.loc_local,
+                self.main_prog.locs.loc_pos,
+                self.main_prog.locs.loc_local,
             );
 
-            self.gl.uniform_1_f32(Some(&self.icon_loc_opacity), opacity);
+            self.icon_prog.set_opacity(&self.gl, opacity);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-            self.gl.use_program(Some(self.program));
+            self.main_prog.use_program(&self.gl);
         }
     }
 
@@ -283,25 +264,24 @@ impl EglContext {
     ) {
         let verts = super::draw::verts_from_pixels(px, py, size, size, surf_w, surf_h);
         unsafe {
-            self.gl.use_program(Some(self.avatar_prog));
+            self.avatar_prog.use_program(&self.gl);
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
 
             super::draw::upload_verts(&self.gl, self.vbo, &verts);
             super::draw::enable_quad_attribs(
                 &self.gl,
-                self.main_locs.loc_pos,
-                self.main_locs.loc_local,
+                self.main_prog.locs.loc_pos,
+                self.main_prog.locs.loc_local,
             );
 
-            self.gl
-                .uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
+            self.avatar_prog.set_opacity(&self.gl, opacity);
             let u_des = self
                 .gl
-                .get_uniform_location(self.avatar_prog, "u_desaturate");
+                .get_uniform_location(self.avatar_prog.program, "u_desaturate");
             self.gl.uniform_1_f32(u_des.as_ref(), desaturate);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-            self.gl.use_program(Some(self.program));
+            self.main_prog.use_program(&self.gl);
         }
     }
 }

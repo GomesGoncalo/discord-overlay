@@ -6,6 +6,8 @@ pub mod shaders;
 
 pub mod program_locations;
 
+pub mod program;
+
 #[cfg(not(test))]
 pub use shaders::{AVATAR_FRAG_SRC, FRAG_SRC, ICON_FRAG_SRC, VERT_SRC};
 
@@ -391,7 +393,7 @@ impl EglContext {
     }
     pub fn use_main_program(&self) {
         unsafe {
-            self.gl.use_program(Some(self.program));
+            self.main_prog.use_program(&self.gl);
         }
     }
 }
