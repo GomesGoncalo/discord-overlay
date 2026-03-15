@@ -213,29 +213,12 @@ impl EglContext {
         color: [f32; 4],
         radius: f32,
     ) {
-        // Convert pixel coords to NDC [-1, 1] (GL Y-up, screen Y-down → flip Y)
-        let x0 = px / surf_w * 2.0 - 1.0;
-        let x1 = (px + pw) / surf_w * 2.0 - 1.0;
-        let y0 = 1.0 - py / surf_h * 2.0;
-        let y1 = 1.0 - (py + ph) / surf_h * 2.0;
-
-        // Triangle strip (TL, TR, BL, BR); each vertex: ndc_x, ndc_y, local_u, local_v
-        let verts: [f32; 16] = [
-            x0, y0, 0.0, 0.0, x1, y0, 1.0, 0.0, x0, y1, 0.0, 1.0, x1, y1, 1.0, 1.0,
-        ];
+        let verts = super::draw::verts_from_pixels(px, py, pw, ph, surf_w, surf_h);
 
         unsafe {
-            let bytes = std::slice::from_raw_parts(verts.as_ptr() as *const u8, 64);
-            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-            self.gl
-                .buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::DYNAMIC_DRAW);
-
-            self.gl.enable_vertex_attrib_array(self.loc_pos);
-            self.gl.enable_vertex_attrib_array(self.loc_local);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_pos, 2, glow::FLOAT, false, 16, 0);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_local, 2, glow::FLOAT, false, 16, 8);
+            // Upload verts and set attribute pointers using shared helpers
+            super::draw::upload_verts(&self.gl, self.vbo, &verts);
+            super::draw::enable_quad_attribs(&self.gl, self.loc_pos, self.loc_local);
 
             self.gl.uniform_4_f32(
                 Some(&self.loc_color),
@@ -270,27 +253,15 @@ impl EglContext {
         tex: glow::NativeTexture,
         opacity: f32,
     ) {
-        let x0 = px / surf_w * 2.0 - 1.0;
-        let x1 = (px + pw) / surf_w * 2.0 - 1.0;
-        let y0 = 1.0 - py / surf_h * 2.0;
-        let y1 = 1.0 - (py + ph) / surf_h * 2.0;
-        let verts: [f32; 16] = [
-            x0, y0, 0.0, 0.0, x1, y0, 1.0, 0.0, x0, y1, 0.0, 1.0, x1, y1, 1.0, 1.0,
-        ];
+        let verts = super::draw::verts_from_pixels(px, py, pw, ph, surf_w, surf_h);
         unsafe {
             self.gl.use_program(Some(self.icon_prog));
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            let bytes = std::slice::from_raw_parts(verts.as_ptr() as *const u8, 64);
-            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-            self.gl
-                .buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::DYNAMIC_DRAW);
-            self.gl.enable_vertex_attrib_array(self.loc_pos);
-            self.gl.enable_vertex_attrib_array(self.loc_local);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_pos, 2, glow::FLOAT, false, 16, 0);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_local, 2, glow::FLOAT, false, 16, 8);
+
+            super::draw::upload_verts(&self.gl, self.vbo, &verts);
+            super::draw::enable_quad_attribs(&self.gl, self.loc_pos, self.loc_local);
+
             self.gl.uniform_1_f32(Some(&self.icon_loc_opacity), opacity);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
             self.gl.use_program(Some(self.program));
@@ -311,27 +282,15 @@ impl EglContext {
         opacity: f32,
         desaturate: f32,
     ) {
-        let x0 = px / surf_w * 2.0 - 1.0;
-        let x1 = (px + size) / surf_w * 2.0 - 1.0;
-        let y0 = 1.0 - py / surf_h * 2.0;
-        let y1 = 1.0 - (py + size) / surf_h * 2.0;
-        let verts: [f32; 16] = [
-            x0, y0, 0.0, 0.0, x1, y0, 1.0, 0.0, x0, y1, 0.0, 1.0, x1, y1, 1.0, 1.0,
-        ];
+        let verts = super::draw::verts_from_pixels(px, py, size, size, surf_w, surf_h);
         unsafe {
             self.gl.use_program(Some(self.avatar_prog));
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            let bytes = std::slice::from_raw_parts(verts.as_ptr() as *const u8, 64);
-            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-            self.gl
-                .buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::DYNAMIC_DRAW);
-            self.gl.enable_vertex_attrib_array(self.loc_pos);
-            self.gl.enable_vertex_attrib_array(self.loc_local);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_pos, 2, glow::FLOAT, false, 16, 0);
-            self.gl
-                .vertex_attrib_pointer_f32(self.loc_local, 2, glow::FLOAT, false, 16, 8);
+
+            super::draw::upload_verts(&self.gl, self.vbo, &verts);
+            super::draw::enable_quad_attribs(&self.gl, self.loc_pos, self.loc_local);
+
             self.gl
                 .uniform_1_f32(Some(&self.avatar_loc_opacity), opacity);
             let u_des = self
