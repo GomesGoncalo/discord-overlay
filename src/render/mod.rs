@@ -4,6 +4,8 @@ use glow::HasContext;
 use khronos_egl as egl;
 pub mod shaders;
 
+pub mod program_locations;
+
 #[cfg(not(test))]
 pub use shaders::{AVATAR_FRAG_SRC, FRAG_SRC, ICON_FRAG_SRC, VERT_SRC};
 
