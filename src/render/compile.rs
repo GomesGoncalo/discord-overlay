@@ -110,17 +110,6 @@ pub fn compile_program_generic<G: GlInterface>(
     prog
 }
 
-// Production wrapper used by the EGL code. Kept behind cfg(not(test)) so tests
-// continue to use the generic/mockable implementation.
-#[cfg(not(test))]
-pub unsafe fn compile_program(
-    gl: &glow::Context,
-    vert_src: &str,
-    frag_src: &str,
-) -> glow::NativeProgram {
-    compile_program_generic(gl, vert_src, frag_src)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
