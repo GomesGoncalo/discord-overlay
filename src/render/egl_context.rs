@@ -34,15 +34,15 @@ pub struct EglContext {
     wl_egl: WlEglSurface,
     pub gl: glow::Context,
     // Rounded-rect shader (background fills)
-    pub main_prog: super::program::MainProgram,
+    pub main_prog: super::program::MainProgram<glow::Context>,
     vbo: glow::NativeBuffer,
     // Icon overlay shader + textures
-    icon_prog: super::program::OpacityProgram,
+    icon_prog: super::program::OpacityProgram<glow::Context>,
     pub tex_mic: glow::NativeTexture,
     pub tex_headphone: glow::NativeTexture,
     pub tex_strikeout: glow::NativeTexture,
     // Circular avatar shader
-    avatar_prog: super::program::OpacityProgram,
+    avatar_prog: super::program::OpacityProgram<glow::Context>,
 }
 #[cfg(not(test))]
 impl EglContext {
@@ -355,17 +355,28 @@ impl EglBackend for EglContext {
 }
 
 #[cfg(not(test))]
+impl EglContext {
+    /// Explicitly destroy GL resources owned by EglContext. Prefer calling this before
+    /// tearing down the EGL context to ensure deterministic cleanup.
+    #[allow(dead_code)]
+    pub unsafe fn destroy(&mut self) {
+        // Delete GL programs, VBO and textures owned by EglContext
+        self.gl.delete_program(self.main_prog.id());
+        self.gl.delete_program(self.icon_prog.id());
+        self.gl.delete_program(self.avatar_prog.id());
+        self.gl.delete_buffer(self.vbo);
+        self.gl.delete_texture(self.tex_mic);
+        self.gl.delete_texture(self.tex_headphone);
+        self.gl.delete_texture(self.tex_strikeout);
+    }
+}
+
+#[cfg(not(test))]
 impl Drop for EglContext {
     fn drop(&mut self) {
         unsafe {
-            // Delete GL programs, VBO and textures owned by EglContext
-            self.gl.delete_program(self.main_prog.id());
-            self.gl.delete_program(self.icon_prog.id());
-            self.gl.delete_program(self.avatar_prog.id());
-            self.gl.delete_buffer(self.vbo);
-            self.gl.delete_texture(self.tex_mic);
-            self.gl.delete_texture(self.tex_headphone);
-            self.gl.delete_texture(self.tex_strikeout);
+            // Prefer explicit destroy(); still delete resources if destroy not called.
+            self.destroy();
         }
     }
 }
