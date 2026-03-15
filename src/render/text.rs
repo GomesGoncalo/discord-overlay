@@ -1,5 +1,3 @@
-//! Text rendering helpers (fontdue) — extracted from mod.rs.
-
 pub fn render_text_texture(font: &fontdue::Font, text: &str, px_size: f32) -> (Vec<u8>, u32, u32) {
     use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
     let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
