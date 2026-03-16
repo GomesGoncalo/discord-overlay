@@ -202,26 +202,13 @@ fn try_connect(
                             subscribe_for_channel(&mut stream, &cid, &mut nonce);
                         }
                         let others = parse_participants(&v["data"]);
-                        let self_nick = others
-                            .iter()
-                            .find(|p| p.user_id == local_user_id)
-                            .and_then(|p| p.nick.clone());
-                        let self_avatar = local_avatar.clone().or_else(|| {
-                            others
-                                .iter()
-                                .find(|p| p.user_id == local_user_id)
-                                .and_then(|p| p.avatar_hash.clone())
-                        });
-                        let self_muted = others
-                            .iter()
-                            .find(|p| p.user_id == local_user_id)
-                            .map(|p| p.muted)
-                            .unwrap_or(false);
-                        let self_deafened = others
-                            .iter()
-                            .find(|p| p.user_id == local_user_id)
-                            .map(|p| p.deafened)
-                            .unwrap_or(false);
+                        let self_p = others.iter().find(|p| p.user_id == local_user_id);
+                        let self_nick = self_p.and_then(|p| p.nick.clone());
+                        let self_avatar = local_avatar
+                            .clone()
+                            .or_else(|| self_p.and_then(|p| p.avatar_hash.clone()));
+                        let self_muted = self_p.map(|p| p.muted).unwrap_or(false);
+                        let self_deafened = self_p.map(|p| p.deafened).unwrap_or(false);
                         let mut parts = vec![super::types::Participant {
                             user_id: local_user_id.as_str().into(),
                             username: local_username.clone(),
