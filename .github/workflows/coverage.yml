@@ -7,6 +7,11 @@ on:
     branches: [ main, master ]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   coverage:
     runs-on: ubuntu-latest
@@ -40,18 +45,43 @@ jobs:
         run: |
           cargo install cargo-tarpaulin --version 0.24.4 || cargo install cargo-tarpaulin
 
-      - name: Run tarpaulin (generate lcov)
+      - name: Run tarpaulin (generate lcov + json)
         run: |
-          cargo tarpaulin --out Lcov --verbose
+          cargo tarpaulin --out Lcov --out Json --verbose
 
       - name: Check coverage baseline
         run: bash scripts/check-coverage.sh
+
+      - name: Generate coverage badge SVG
+        run: |
+          python3 scripts/generate-coverage-badge.py --input tarpaulin-report.json --output coverage-badge.svg
 
       - name: Upload lcov artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
           path: lcov.info
+
+      - name: Configure GitHub Pages
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+        uses: actions/configure-pages@v5
+
+      - name: Prepare Pages artifact
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+        run: |
+          mkdir -p _site
+          cp coverage-badge.svg _site/coverage-badge.svg
+
+      - name: Upload Pages artifact
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
+        uses: actions/deploy-pages@v4
 
       - name: Upload to Codecov
         if: ${{ env.CODECOV_TOKEN != '' }}
