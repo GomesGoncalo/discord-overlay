@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Frame structure: [op: u32 LE][len: u32 LE][payload: UTF-8 JSON]
 pub const OP_HANDSHAKE: u32 = 0;
@@ -96,7 +96,9 @@ pub fn is_timeout(e: &io::Error) -> bool {
 }
 
 pub fn send_cmd(stream: &mut UnixStream, msg: Value) {
-    let _ = write_frame(stream, OP_FRAME, &msg.to_string());
+    if let Err(e) = write_frame(stream, OP_FRAME, &msg.to_string()) {
+        warn!("IPC send failed: {e}");
+    }
 }
 
 pub fn token_path() -> std::path::PathBuf {
@@ -118,10 +120,14 @@ pub fn load_token() -> Option<(String, String)> {
 }
 
 pub fn save_token(access: &str, refresh: &str) {
-    let _ = std::fs::write(
-        token_path(),
+    let path = token_path();
+    match std::fs::write(
+        &path,
         json!({"access_token": access, "refresh_token": refresh}).to_string(),
-    );
+    ) {
+        Ok(()) => debug!("token saved to {}", path.display()),
+        Err(e) => warn!("failed to save token to {}: {e}", path.display()),
+    }
 }
 
 #[cfg(test)]

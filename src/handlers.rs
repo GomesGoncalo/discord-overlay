@@ -229,10 +229,10 @@ impl PointerHandler for App {
                 }
 
                 Release { button, .. } => {
-                    if button == BTN_LEFT && self.dragging {
-                        debug!("drag released");
-                        self.dragging = false;
-                    } else if button == BTN_LEFT {
+                    if button == BTN_LEFT {
+                        if self.dragging {
+                            debug!("drag released");
+                        }
                         self.dragging = false;
                     }
                 }

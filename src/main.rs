@@ -266,15 +266,13 @@ fn main() {
                 app.opacity = new_cfg.opacity;
                 app.max_visible_rows = new_cfg.max_visible_rows;
                 // Regenerate participant name textures with (possibly) new font size
-                let user_ids: Vec<crate::discord::UserId> =
-                    app.participants.iter().map(|p| p.user_id.clone()).collect();
-                let names: Vec<String> = app
+                let participants: Vec<(crate::discord::UserId, String)> = app
                     .participants
                     .iter()
-                    .map(|p| p.display_name.clone())
+                    .map(|p| (p.user_id.clone(), p.display_name.clone()))
                     .collect();
                 app.config = new_cfg;
-                for (uid, name) in user_ids.iter().zip(names.iter()) {
+                for (uid, name) in &participants {
                     if let Some((tex, _, _)) = app.name_textures.remove(uid) {
                         app.egl.delete_texture(tex);
                     }
