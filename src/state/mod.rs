@@ -313,7 +313,8 @@ impl App {
                     self.channel_name = channel_name.clone();
                     if let Some(ref name) = channel_name {
                         if let Some(font) = &self.font {
-                            let (pixels, w, h) = render_text_texture(font, name, 13.0);
+                            let display = format!("# {name}");
+                            let (pixels, w, h) = render_text_texture(font, &display, 13.0);
                             if w > 0 && h > 0 {
                                 let tex = self.egl.upload_texture_wh(&pixels, w, h);
                                 self.channel_name_tex = Some((tex, w, h));
@@ -488,6 +489,18 @@ impl App {
     fn draw_header(&mut self, op: f32, sw: f32, sh: f32) {
         let (hx, hy, hw, hh) = drag_handle_rects(self.width, 64);
 
+        // Header panel background
+        self.egl.draw_rect(
+            2.0,
+            2.0,
+            sw - 4.0,
+            60.0,
+            sw,
+            sh,
+            [0.08, 0.09, 0.11, 0.72 * op],
+            10.0,
+        );
+
         // Drag handle — blue pill
         self.egl.draw_rect(
             hx as f32,
@@ -504,16 +517,30 @@ impl App {
         let text_x = (hx + hw) as f32 + 8.0;
         if let Some((tex, tw, th)) = self.guild_name_tex {
             self.egl
-                .draw_icon(text_x, 4.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
+                .draw_icon(text_x, 6.0, tw as f32, th as f32, sw, sh, tex, op * 0.55);
         }
         if let Some((tex, tw, th)) = self.channel_name_tex {
             self.egl
-                .draw_icon(text_x, 20.0, tw as f32, th as f32, sw, sh, tex, op * 0.85);
+                .draw_icon(text_x, 22.0, tw as f32, th as f32, sw, sh, tex, op * 0.90);
         }
         if let Some((tex, tw, th)) = self.timer_tex {
             self.egl
-                .draw_icon(text_x, 36.0, tw as f32, th as f32, sw, sh, tex, op * 0.60);
+                .draw_icon(text_x, 40.0, tw as f32, th as f32, sw, sh, tex, op * 0.55);
         }
+    }
+
+    /// Draw a 1px separator line between the header and the participant list.
+    fn draw_header_separator(&self, op: f32, sw: f32, sh: f32) {
+        self.egl.draw_rect(
+            8.0,
+            63.0,
+            sw - 16.0,
+            1.0,
+            sw,
+            sh,
+            [1.0, 1.0, 1.0, 0.08 * op],
+            0.0,
+        );
     }
 
     /// Draw scroll indicator (if needed).
@@ -656,6 +683,25 @@ impl App {
             8.0,
         );
 
+        // Speaking tint — subtle color wash over the row background
+        if params.speaking {
+            self.egl.draw_rect(
+                4.0,
+                params.row_y_f + 4.0,
+                sw - 8.0,
+                row_h as f32 - 8.0,
+                sw,
+                sh,
+                [
+                    self.config.speaking_color[0],
+                    self.config.speaking_color[1],
+                    self.config.speaking_color[2],
+                    0.10 * row_anim_op,
+                ],
+                8.0,
+            );
+        }
+
         // Avatar positioning
         let av_size = 32f32;
         let av_x = 12f32;
@@ -744,41 +790,35 @@ impl App {
         let mic_x = sw - icon_sz * 2.0 - icon_gap - 8.0;
         let hp_x = sw - icon_sz - 8.0;
 
-        // Mute icon with background when muted
-        let mic_op = if params.muted {
-            row_anim_op * 0.9
-        } else {
-            row_anim_op * 0.35
-        };
-        let mute_params = StatusIconParams {
-            x: mic_x,
-            y: icon_y,
-            size: icon_sz,
-            tex: mic_tex,
-            strike_tex,
-            is_active: params.muted,
-            opacity: mic_op,
-            bg_opacity: Some(0.6 * row_anim_op),
-        };
-        self.draw_status_icon(&mute_params, sw, sh);
+        // Mute icon — only rendered when the participant is actually muted
+        if params.muted {
+            let mute_params = StatusIconParams {
+                x: mic_x,
+                y: icon_y,
+                size: icon_sz,
+                tex: mic_tex,
+                strike_tex,
+                is_active: true,
+                opacity: row_anim_op * 0.9,
+                bg_opacity: Some(0.6 * row_anim_op),
+            };
+            self.draw_status_icon(&mute_params, sw, sh);
+        }
 
-        // Deafen icon with background when deafened
-        let hp_op = if params.deafened {
-            row_anim_op * 0.9
-        } else {
-            row_anim_op * 0.35
-        };
-        let deaf_params = StatusIconParams {
-            x: hp_x,
-            y: icon_y,
-            size: icon_sz,
-            tex: hp_tex,
-            strike_tex,
-            is_active: params.deafened,
-            opacity: hp_op,
-            bg_opacity: Some(0.6 * row_anim_op),
-        };
-        self.draw_status_icon(&deaf_params, sw, sh);
+        // Deafen icon — only rendered when the participant is actually deafened
+        if params.deafened {
+            let deaf_params = StatusIconParams {
+                x: hp_x,
+                y: icon_y,
+                size: icon_sz,
+                tex: hp_tex,
+                strike_tex,
+                is_active: true,
+                opacity: row_anim_op * 0.9,
+                bg_opacity: Some(0.6 * row_anim_op),
+            };
+            self.draw_status_icon(&deaf_params, sw, sh);
+        }
     }
 
     pub fn draw(&mut self) {
@@ -809,6 +849,9 @@ impl App {
 
         // Draw header (drag handle, guild/channel names, timer)
         self.draw_header(op, sw, sh);
+        if self.in_channel {
+            self.draw_header_separator(op, sw, sh);
+        }
 
         // Draw mute/deafen buttons with proper colors and icons
         let effectively_muted = self.discord_mute || self.discord_deaf;
