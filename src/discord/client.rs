@@ -173,6 +173,18 @@ fn try_connect(
                     }
                     if let Some(cid) = subscribe_channel {
                         subscribe_for_channel(&mut stream, &cid, &mut nonce);
+                        // VOICE_CHANNEL_SELECT only carries the channel ID; fetch full
+                        // channel info (name, participants, guild_id) via a separate command.
+                        if evt == "VOICE_CHANNEL_SELECT" {
+                            send_cmd(
+                                &mut stream,
+                                json!({
+                                    "cmd": "GET_SELECTED_VOICE_CHANNEL",
+                                    "args": {},
+                                    "nonce": "gvsc"
+                                }),
+                            );
+                        }
                     }
                     if let Some(gid) = guild_id {
                         send_cmd(
