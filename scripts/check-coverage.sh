@@ -18,8 +18,11 @@ fi
 
 echo "📊 Checking coverage (baseline: ${BASELINE}%)..."
 
-# Run tarpaulin and extract coverage from JSON report
-cargo tarpaulin --engine "$TARPAULIN_ENGINE" --out Json > /dev/null 2>&1
+# Reuse an existing tarpaulin report when available.
+if [ ! -f "tarpaulin-report.json" ]; then
+    # Run tarpaulin and extract coverage from JSON report.
+    cargo tarpaulin --engine "$TARPAULIN_ENGINE" --out Json > /dev/null 2>&1
+fi
 
 if [ ! -f "tarpaulin-report.json" ]; then
     echo "⚠️  tarpaulin-report.json not generated (skipping coverage check)"
