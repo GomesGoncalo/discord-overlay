@@ -128,8 +128,9 @@ fn main() {
 
                 // Run at 16ms when animating, 500ms when idle or just tracking timer
                 let target_alpha = if app.in_channel { 1.0_f32 } else { 0.0_f32 };
-                let animating = app.participants.iter().any(|p| p.anim < 1.0 || p.leaving)
-                    || (app.idle_alpha - target_alpha).abs() > 0.005;
+                let animating = app.participants.iter().any(|p| {
+                    p.anim < 1.0 || p.leaving || p.speaking_anim > 0.005 && p.speaking_anim < 0.995
+                }) || (app.idle_alpha - target_alpha).abs() > 0.005;
                 let next = if animating {
                     std::time::Duration::from_millis(16)
                 } else {
@@ -211,6 +212,8 @@ fn main() {
         ptt_mode: false,
         ptt_active: false,
         self_user_id: crate::discord::UserId::default(),
+        participant_count_tex: None,
+        last_participant_count: usize::MAX,
         config: cfg,
     };
 

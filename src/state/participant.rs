@@ -12,6 +12,8 @@ pub struct ParticipantState {
     pub anim: f32,
     /// True when this participant is animating out before removal.
     pub leaving: bool,
+    /// Speaking ring pulse: animates 0→1 when speaking, 1→0 when silence detected.
+    pub speaking_anim: f32,
 }
 
 /// Builder for ParticipantState with sensible defaults.
@@ -85,6 +87,7 @@ impl ParticipantStateBuilder {
             speaking_until: self.speaking_until,
             anim: self.anim,
             leaving: self.leaving,
+            speaking_anim: 0.0,
         }
     }
 }
