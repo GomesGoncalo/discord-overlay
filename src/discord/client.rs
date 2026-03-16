@@ -1,15 +1,16 @@
 //! Discord IPC client main loop.
 
 use serde_json::{json, Value};
-use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use super::auth::try_auth;
 use super::handlers::{get_event_handlers, FrameProcessResult};
-use super::ipc::{find_socket, read_frame, send_cmd, write_frame, OP_FRAME, OP_HANDSHAKE};
+use super::ipc::{
+    find_socket, is_timeout, read_frame, send_cmd, write_frame, OP_FRAME, OP_HANDSHAKE,
+};
 use super::parser::{parse_participants, parse_voice_state, subscribe_for_channel};
 use super::types::{Config, DiscordCommand, DiscordEvent};
 use crate::avatar;
@@ -80,6 +81,7 @@ fn try_connect(
     tx: &calloop::channel::Sender<DiscordEvent>,
     cmd_rx: &mpsc::Receiver<DiscordCommand>,
 ) -> Result<(), ()> {
+    let _span = tracing::info_span!("discord_connect").entered();
     let mut stream = loop {
         match find_socket() {
             Some(s) => break s,
@@ -150,7 +152,7 @@ fn try_connect(
                 let cmd = v["cmd"].as_str().unwrap_or("");
                 let evt = v["evt"].as_str().unwrap_or("");
                 let vnonce = v["nonce"].as_str().unwrap_or("");
-                debug!("frame cmd={cmd:?} evt={evt:?} nonce={vnonce:?}");
+                trace!(cmd, evt, nonce = vnonce, "ipc frame received");
 
                 let (events, avatars, subscribe_channel, guild_id) = process_frame_events(
                     &v,
@@ -289,7 +291,7 @@ fn try_connect(
                     }
                 } else if evt == "SPEAKING_START" {
                     if let Some(uid) = v["data"]["user_id"].as_str() {
-                        debug!("speaking_start user_id={uid}");
+                        trace!(user_id = uid, "speaking start");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
                             user_id: uid.into(),
                             speaking: true,
@@ -297,7 +299,7 @@ fn try_connect(
                     }
                 } else if evt == "SPEAKING_END" {
                     if let Some(uid) = v["data"]["user_id"].as_str() {
-                        debug!("speaking_end user_id={uid}");
+                        trace!(user_id = uid, "speaking end");
                         let _ = tx.send(DiscordEvent::SpeakingUpdate {
                             user_id: uid.into(),
                             speaking: false,
@@ -407,19 +409,12 @@ fn dispatch_event(v: &Value, tx: &calloop::channel::Sender<DiscordEvent>) {
     }
 }
 
-fn is_timeout(e: &io::Error) -> bool {
-    matches!(
-        e.kind(),
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::handlers::EventHandler;
     use super::*;
     use serde_json::json;
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
     #[test]
     fn is_timeout_kinds() {

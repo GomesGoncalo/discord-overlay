@@ -14,6 +14,8 @@ use sctk::reexports::client::Proxy;
 #[cfg(not(test))]
 use smithay_client_toolkit as sctk;
 #[cfg(not(test))]
+use tracing::{debug, info};
+#[cfg(not(test))]
 use wayland_egl::WlEglSurface;
 
 #[cfg(not(test))]
@@ -157,7 +159,7 @@ impl EglContext {
         let tex_headphone = unsafe { upload_texture(&gl, &icon_headphone(64), 64) };
         let tex_strikeout = unsafe { upload_texture(&gl, &icon_strikeout(64), 64) };
 
-        EglContext {
+        let ctx = EglContext {
             egl: egl_inst,
             egl_display,
             egl_surface,
@@ -171,10 +173,13 @@ impl EglContext {
             tex_headphone,
             tex_strikeout,
             avatar_prog,
-        }
+        };
+        info!(width, height, "EGL/GLES2 context initialized");
+        ctx
     }
 
     pub fn resize(&self, width: i32, height: i32) {
+        debug!(width, height, "EGL surface resized");
         self.wl_egl.resize(width, height, 0, 0);
     }
 

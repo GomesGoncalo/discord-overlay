@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 use sctk::compositor::{CompositorState, Region};
 use sctk::output::OutputState;
@@ -187,9 +187,12 @@ impl App {
     /// Compact-mode render: single horizontal row of avatars (40 px) with speaking rings.
     fn draw_compact(&mut self) {
         let op = self.opacity * self.idle_alpha;
-        debug!(
-            "DRAW_COMPACT: in_channel={} idle_alpha={:.2} opacity={:.2} final_op={:.2}",
-            self.in_channel, self.idle_alpha, self.opacity, op
+        trace!(
+            in_channel = self.in_channel,
+            idle_alpha = self.idle_alpha,
+            opacity = self.opacity,
+            final_op = op,
+            "draw compact"
         );
 
         // Ensure initials exist for missing avatars (simplifies the core draw path)
@@ -221,18 +224,12 @@ impl App {
         region.add(0, 0, self.width as i32, self.height as i32);
         self.layer.set_input_region(Some(region.wl_region()));
 
-        debug!("DRAW_COMPACT: Calling egl.swap()");
         self.egl.swap();
-        debug!(
-            "DRAW_COMPACT: Calling damage() damage_rect=(0,0,{},{})",
-            self.width as i32, self.height as i32
-        );
         self.layer
             .wl_surface()
             .damage(0, 0, self.width as i32, self.height as i32);
-        debug!("DRAW_COMPACT: Calling wl_surface().commit()");
         self.layer.wl_surface().commit();
-        debug!("DRAW_COMPACT: Complete");
+        trace!("draw compact complete");
     }
 
     /// Remove all input regions so the overlay is fully click-through (used when hidden).
@@ -280,6 +277,9 @@ impl App {
             }
             discord::DiscordEvent::VoiceSettings { mute, deaf } => {
                 let changed = self.discord_mute != mute || self.discord_deaf != deaf;
+                if changed {
+                    debug!(mute, deaf, "local voice settings changed");
+                }
                 self.discord_mute = mute;
                 self.discord_deaf = deaf;
                 changed
@@ -292,6 +292,11 @@ impl App {
                 participants: parts,
                 channel_name,
             } => {
+                debug!(
+                    count = parts.len(),
+                    channel = ?channel_name,
+                    "voice participant list received"
+                );
                 // Update in_channel state and channel name texture
                 let was_in_channel = self.in_channel;
                 self.in_channel = channel_name.is_some();
@@ -366,8 +371,8 @@ impl App {
                     self.apply_compact_resize();
                 }
                 debug!(
-                    "UserJoined: Setting in_channel=true, now have {} participants",
-                    self.participants.len()
+                    count = self.participants.len(),
+                    "participant count after join"
                 );
                 true
             }
@@ -388,6 +393,14 @@ impl App {
             } => {
                 if let Some(p) = self.find_participant_mut(&user_id) {
                     let changed = p.muted != muted || p.deafened != deafened;
+                    if changed {
+                        debug!(
+                            name = %p.display_name,
+                            muted,
+                            deafened,
+                            "participant state updated"
+                        );
+                    }
                     p.muted = muted;
                     p.deafened = deafened;
                     return changed;
@@ -396,6 +409,7 @@ impl App {
             }
             discord::DiscordEvent::SpeakingUpdate { user_id, speaking } => {
                 if let Some(p) = self.find_participant_mut(&user_id) {
+                    trace!(name = %p.display_name, speaking, "speaking update");
                     p.speaking_until = if speaking {
                         // Ring stays for 1.5s after last SPEAKING_START.
                         // Discord fires SPEAKING_START ~every 1s while active,
@@ -413,11 +427,13 @@ impl App {
                 rgba,
                 size,
             } => {
+                debug!(%user_id, size, "avatar texture uploaded");
                 let tex = self.egl.upload_texture_wh(&rgba, size, size);
                 self.avatar_textures.insert(user_id, tex);
                 true
             }
             discord::DiscordEvent::GuildName { name } => {
+                debug!(guild = ?name, "guild name updated");
                 delete_texture_if_present(&*self.egl, &mut self.guild_name_tex);
                 if name.is_empty() {
                     self.guild_name = None;
@@ -428,6 +444,7 @@ impl App {
                 true
             }
             discord::DiscordEvent::Disconnected => {
+                info!("Discord disconnected, clearing voice state");
                 // Clear all voice-channel state so the UI resets to idle.
                 self.in_channel = false;
                 self.channel_name = None;
@@ -766,21 +783,19 @@ impl App {
 
     pub fn draw(&mut self) {
         let op = self.opacity * self.idle_alpha;
-        debug!(
-            "DRAW: in_channel={} idle_alpha={:.2} opacity={:.2} final_op={:.2} compact={}",
-            self.in_channel, self.idle_alpha, self.opacity, op, self.compact
+        trace!(
+            in_channel = self.in_channel,
+            idle_alpha = self.idle_alpha,
+            opacity = self.opacity,
+            final_op = op,
+            compact = self.compact,
+            "draw"
         );
 
         if self.compact {
-            debug!("DRAW: Using compact mode");
             self.draw_compact();
             return;
         }
-
-        debug!(
-            "DRAW: Using normal mode, w={} h={}",
-            self.width, self.height
-        );
         let (sw, sh) = (self.width as f32, self.height as f32);
         let (bx, by, bw, bh) = button_rects(self.width, 64);
         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
@@ -942,18 +957,153 @@ impl App {
         // Draw scroll indicator (if needed)
         self.draw_scroll_indicator(op, sw, sh);
 
-        debug!("DRAW: Calling egl.swap()");
         self.egl.swap();
-        debug!(
-            "DRAW: Calling damage() damage_rect=(0,0,{},{})",
-            self.width as i32, self.height as i32
-        );
         self.layer
             .wl_surface()
             .damage(0, 0, self.width as i32, self.height as i32);
-        debug!("DRAW: Calling wl_surface().commit()");
         self.layer.wl_surface().commit();
-        debug!("DRAW: Complete");
+        trace!("draw complete");
+    }
+
+    // ─── Animation tick methods (called from the main timer callback) ─────────
+
+    /// Advance join/leave animations and remove fully-faded participants.
+    /// Returns true if a redraw is needed.
+    pub fn tick_animations(&mut self, anim_speed: f32) -> bool {
+        let mut needs_redraw = false;
+        let mut to_remove: Vec<crate::discord::UserId> = Vec::new();
+
+        for p in &mut self.participants {
+            if p.leaving {
+                p.anim = (p.anim - anim_speed).max(0.0);
+                needs_redraw = true;
+                if p.anim <= 0.0 {
+                    to_remove.push(p.user_id.clone());
+                }
+            } else if p.anim < 1.0 {
+                p.anim = (p.anim + anim_speed).min(1.0);
+                needs_redraw = true;
+            }
+        }
+
+        for uid in &to_remove {
+            if let Some(pos) = self.participants.iter().position(|p| &p.user_id == uid) {
+                let name = self.participants[pos].display_name.clone();
+                debug!(%name, "participant animation complete, removing");
+                self.participants.remove(pos);
+                if let Some((tex, _, _)) = self.name_textures.remove(uid) {
+                    self.egl.delete_texture(tex);
+                }
+                if let Some((tex, _, _)) = self.initials_textures.remove(uid) {
+                    self.egl.delete_texture(tex);
+                }
+                if let Some(tex) = self.avatar_textures.remove(uid) {
+                    self.egl.delete_texture(tex);
+                }
+            }
+        }
+
+        if !to_remove.is_empty() {
+            let max_offset = self
+                .participants
+                .len()
+                .saturating_sub(self.max_visible_rows);
+            self.scroll_offset = self.scroll_offset.min(max_offset);
+            let new_h = self.compute_overlay_height();
+            self.resize_overlay(new_h);
+            if self.compact {
+                self.apply_compact_resize();
+            }
+            needs_redraw = true;
+        }
+
+        needs_redraw
+    }
+
+    /// Clear expired speaking rings. Returns true if any ring was cleared.
+    pub fn tick_speaking_expiry(&mut self, now: std::time::Instant) -> bool {
+        let any_expired = self
+            .participants
+            .iter()
+            .any(|p| p.speaking_until.map(|t| t <= now).unwrap_or(false));
+        if any_expired {
+            for p in &mut self.participants {
+                if p.speaking_until.map(|t| t <= now).unwrap_or(false) {
+                    p.speaking_until = None;
+                }
+            }
+        }
+        any_expired
+    }
+
+    /// Update push-to-talk active state. Returns true if the state changed.
+    pub fn tick_ptt(&mut self, now: std::time::Instant) -> bool {
+        if !self.ptt_mode {
+            return false;
+        }
+        let self_speaking = self.participants.iter().any(|p| {
+            p.user_id == self.self_user_id && p.speaking_until.map(|t| t > now).unwrap_or(false)
+        });
+        if self.ptt_active != self_speaking {
+            self.ptt_active = self_speaking;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Animate the idle-fade alpha toward its target (1.0 in channel, 0.0 out).
+    /// Also clears the input region when the overlay becomes fully hidden.
+    /// Returns true if the alpha is still moving (redraw needed).
+    pub fn tick_idle_alpha(&mut self) -> bool {
+        let target_alpha = if self.in_channel { 1.0_f32 } else { 0.0_f32 };
+        let animating = (self.idle_alpha - target_alpha).abs() > 0.005;
+        if animating {
+            let speed = 0.016 / 0.25;
+            if self.idle_alpha < target_alpha {
+                self.idle_alpha = (self.idle_alpha + speed).min(target_alpha);
+            } else {
+                self.idle_alpha = (self.idle_alpha - speed).max(target_alpha);
+            }
+            trace!(
+                target = target_alpha,
+                current = self.idle_alpha,
+                "animating idle alpha"
+            );
+        }
+        // Clear input region when fully hidden (checked every tick, cheap)
+        if !self.in_channel && self.idle_alpha <= 0.005 && self.idle_alpha > -0.001 {
+            trace!("overlay fully hidden, clearing input region");
+            self.clear_input_region();
+        }
+        animating
+    }
+
+    /// Update the session timer texture when the elapsed second changes.
+    /// Returns true if the texture was updated (redraw needed).
+    pub fn tick_timer(&mut self) -> bool {
+        let joined_at = match self.channel_joined_at {
+            Some(t) => t,
+            None => return false,
+        };
+        let elapsed = joined_at.elapsed().as_secs() as u32;
+        if elapsed == self.last_timer_secs {
+            return false;
+        }
+        self.last_timer_secs = elapsed;
+        let h = elapsed / 3600;
+        let m = (elapsed % 3600) / 60;
+        let s = elapsed % 60;
+        let label = if h > 0 {
+            format!("{h}:{m:02}:{s:02}")
+        } else {
+            format!("{m}:{s:02}")
+        };
+        if let Some((tex, _, _)) = self.timer_tex.take() {
+            self.egl.delete_texture(tex);
+        }
+        self.timer_tex = self.render_text_tex(&label, 12.0);
+        true
     }
 }
 

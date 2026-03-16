@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Frame structure: [op: u32 LE][len: u32 LE][payload: UTF-8 JSON]
 pub const OP_HANDSHAKE: u32 = 0;
@@ -53,6 +53,10 @@ pub fn write_frame(stream: &mut impl Write, op: u32, payload: &str) -> io::Resul
     stream.write_all(data)
 }
 
+/// Maximum IPC frame payload size (16 MiB). Discord frames are tiny in practice;
+/// this guards against corrupt or malicious length fields causing huge allocations.
+const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
+
 pub fn read_frame(stream: &mut impl Read) -> io::Result<(u32, Value)> {
     let mut hdr = [0u8; 8];
     stream.read_exact(&mut hdr)?;
@@ -66,11 +70,29 @@ pub fn read_frame(stream: &mut impl Read) -> io::Result<(u32, Value)> {
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid length header"))?,
     ) as usize;
+    if len > MAX_FRAME_LEN {
+        warn!(
+            len,
+            max = MAX_FRAME_LEN,
+            "IPC frame rejected: payload exceeds size limit"
+        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame too large: {len} bytes (max {MAX_FRAME_LEN})"),
+        ));
+    }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
     let v =
         serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok((op, v))
+}
+
+pub fn is_timeout(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 pub fn send_cmd(stream: &mut UnixStream, msg: Value) {

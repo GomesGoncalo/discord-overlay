@@ -3,9 +3,9 @@
 use serde_json::json;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
-use super::ipc::{load_token, read_frame, save_token, send_cmd, token_path, OP_FRAME};
+use super::ipc::{is_timeout, load_token, read_frame, save_token, send_cmd, token_path, OP_FRAME};
 use super::types::Config;
 
 fn http_exchange(params: &str) -> Option<(String, String)> {
@@ -124,14 +124,17 @@ pub fn authorize_flow(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
 }
 
 pub fn try_auth(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
+    let _span = tracing::info_span!("discord_auth").entered();
     if let Some((at, rt)) = load_token() {
+        debug!("found cached token, authenticating");
         // Try the cached access token
         match authenticate(stream, &at) {
             Ok(tok) => return Some(tok),
             Err(AuthError::InvalidToken) => {
                 // Token invalid/expired — try the refresh token
-                warn!("Access token invalid/expired, refreshing...");
+                warn!("access token invalid/expired, refreshing...");
                 if let Some((new_at, new_rt)) = do_refresh(cfg, &rt) {
+                    info!("token refreshed successfully");
                     save_token(&new_at, &new_rt);
                     match authenticate(stream, &new_at) {
                         Ok(tok) => return Some(tok),
@@ -155,10 +158,6 @@ pub fn try_auth(cfg: &Config, stream: &mut UnixStream) -> Option<String> {
     }
     // No valid token — do full OAuth flow
     authorize_flow(cfg, stream)
-}
-
-pub fn is_timeout(e: &std::io::Error) -> bool {
-    e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut
 }
 
 #[cfg(test)]

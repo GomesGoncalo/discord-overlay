@@ -1,4 +1,5 @@
 // Shader compile/link helper for render module.
+use tracing::debug;
 
 // Abstraction over GLES API used by the compile helper. This allows unit-testing the
 // compile/link logic without a real GL context by providing a mock implementation.
@@ -107,6 +108,7 @@ pub fn compile_program_generic<G: GlInterface>(
     );
     gl.delete_shader(&vs);
     gl.delete_shader(&fs);
+    debug!("shader program compiled and linked");
     prog
 }
 
