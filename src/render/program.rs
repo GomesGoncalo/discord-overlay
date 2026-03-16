@@ -6,24 +6,24 @@ use std::marker::PhantomData;
 /// Parameterized over a `G` which implements both `compile::GlInterface` and `program_gl::ProgramGl`.
 pub struct MainProgram<G>
 where
-    G: super::program_gl::ProgramGl,
+    G: crate::render::program_gl::ProgramGl,
 {
-    program: <G as super::compile::GlInterface>::Program,
-    locs: super::program_locations::MainProgramLocations<
-        <G as super::program_gl::ProgramGl>::UniformLocation,
+    program: <G as crate::render::compile::GlInterface>::Program,
+    locs: crate::render::program_locations::MainProgramLocations<
+        <G as crate::render::program_gl::ProgramGl>::UniformLocation,
     >,
     _marker: PhantomData<G>,
 }
 
 impl<G> MainProgram<G>
 where
-    G: super::program_gl::ProgramGl,
-    <G as super::compile::GlInterface>::Program: Copy,
+    G: crate::render::program_gl::ProgramGl,
+    <G as crate::render::compile::GlInterface>::Program: Copy,
 {
     /// Compile, link and query locations for the main program.
     pub unsafe fn new(gl: &G, vert_src: &str, frag_src: &str) -> Self {
-        let prog = super::compile::compile_program_generic(gl, vert_src, frag_src);
-        let locs = super::program_locations::query_main_program_generic(gl, &prog);
+        let prog = crate::render::compile::compile_program_generic(gl, vert_src, frag_src);
+        let locs = crate::render::program_locations::query_main_program_generic(gl, &prog);
         MainProgram {
             program: prog,
             locs,
@@ -56,8 +56,8 @@ where
     #[allow(dead_code)]
     pub fn locs(
         &self,
-    ) -> &super::program_locations::MainProgramLocations<
-        <G as super::program_gl::ProgramGl>::UniformLocation,
+    ) -> &crate::render::program_locations::MainProgramLocations<
+        <G as crate::render::program_gl::ProgramGl>::UniformLocation,
     > {
         &self.locs
     }
@@ -66,21 +66,21 @@ where
 /// Generic wrapper for simple programs that expose a single `u_opacity` uniform (icons, avatars).
 pub struct OpacityProgram<G>
 where
-    G: super::program_gl::ProgramGl,
+    G: crate::render::program_gl::ProgramGl,
 {
-    program: <G as super::compile::GlInterface>::Program,
-    loc_opacity: <G as super::program_gl::ProgramGl>::UniformLocation,
+    program: <G as crate::render::compile::GlInterface>::Program,
+    loc_opacity: <G as crate::render::program_gl::ProgramGl>::UniformLocation,
     _marker: PhantomData<G>,
 }
 
 impl<G> OpacityProgram<G>
 where
-    G: super::program_gl::ProgramGl,
-    <G as super::compile::GlInterface>::Program: Copy,
+    G: crate::render::program_gl::ProgramGl,
+    <G as crate::render::compile::GlInterface>::Program: Copy,
 {
     pub unsafe fn new(gl: &G, vert_src: &str, frag_src: &str) -> Self {
-        let prog = super::compile::compile_program_generic(gl, vert_src, frag_src);
-        let loc_opacity = super::program_locations::query_opacity_generic(gl, &prog);
+        let prog = crate::render::compile::compile_program_generic(gl, vert_src, frag_src);
+        let loc_opacity = crate::render::program_locations::query_opacity_generic(gl, &prog);
         OpacityProgram {
             program: prog,
             loc_opacity,
@@ -99,7 +99,7 @@ where
 
     /// Accessor for underlying program id.
     #[allow(dead_code)]
-    pub fn id(&self) -> <G as super::compile::GlInterface>::Program {
+    pub fn id(&self) -> <G as crate::render::compile::GlInterface>::Program {
         self.program
     }
 }

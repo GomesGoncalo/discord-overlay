@@ -6,6 +6,8 @@ pub mod shaders;
 
 pub mod program_locations;
 
+pub mod program_gl;
+
 pub mod program;
 
 #[cfg(not(test))]

@@ -9,23 +9,19 @@ pub const UNIFORM_RADIUS: &str = "u_radius";
 pub const UNIFORM_OPACITY: &str = "u_opacity";
 
 /// Locations for the main rounded-rect shader program.
-pub struct MainProgramLocations {
+pub struct MainProgramLocations<U> {
     pub loc_pos: u32,
     pub loc_local: u32,
-    pub loc_color: glow::UniformLocation,
-    pub loc_size: glow::UniformLocation,
-    pub loc_radius: glow::UniformLocation,
+    pub loc_color: U,
+    pub loc_size: U,
+    pub loc_radius: U,
 }
 
-#[cfg(not(test))]
-use glow::HasContext;
-
-#[cfg(not(test))]
-/// Query and return all needed locations for the main program.
-pub unsafe fn query_main_program(
-    gl: &glow::Context,
-    program: glow::NativeProgram,
-) -> MainProgramLocations {
+/// Generic query implementation that uses the ProgramGl abstraction so tests can supply a mock GL.
+pub unsafe fn query_main_program_generic<G: super::program_gl::ProgramGl>(
+    gl: &G,
+    program: &<G as super::compile::GlInterface>::Program,
+) -> MainProgramLocations<G::UniformLocation> {
     let loc_color = gl.get_uniform_location(program, UNIFORM_COLOR).unwrap();
     let loc_size = gl.get_uniform_location(program, UNIFORM_SIZE).unwrap();
     let loc_radius = gl.get_uniform_location(program, UNIFORM_RADIUS).unwrap();
@@ -40,13 +36,29 @@ pub unsafe fn query_main_program(
     }
 }
 
+/// Convenience wrapper used by production code (glow::Context).
 #[cfg(not(test))]
-/// Query the standard opacity uniform used by icon/avatar shaders.
+pub unsafe fn query_main_program(
+    gl: &glow::Context,
+    program: glow::NativeProgram,
+) -> MainProgramLocations<glow::UniformLocation> {
+    query_main_program_generic(gl, &program)
+}
+
+/// Generic query for the standard opacity uniform used by icon/avatar shaders.
+pub unsafe fn query_opacity_generic<G: super::program_gl::ProgramGl>(
+    gl: &G,
+    program: &<G as super::compile::GlInterface>::Program,
+) -> G::UniformLocation {
+    gl.get_uniform_location(program, UNIFORM_OPACITY).unwrap()
+}
+
+#[cfg(not(test))]
 pub unsafe fn query_opacity(
     gl: &glow::Context,
     program: glow::NativeProgram,
 ) -> glow::UniformLocation {
-    gl.get_uniform_location(program, UNIFORM_OPACITY).unwrap()
+    query_opacity_generic(gl, &program)
 }
 
 #[cfg(test)]
