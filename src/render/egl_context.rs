@@ -363,7 +363,6 @@ impl EglBackend for EglContext {
 impl EglContext {
     /// Explicitly destroy GL resources owned by EglContext. Prefer calling this before
     /// tearing down the EGL context to ensure deterministic cleanup.
-    #[allow(dead_code)]
     pub unsafe fn destroy(&mut self) {
         // Delete GL programs, VBO and textures owned by EglContext
         self.gl.delete_program(self.main_prog.id());

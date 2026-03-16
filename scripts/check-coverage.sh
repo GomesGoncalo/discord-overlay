@@ -3,6 +3,7 @@
 set -e
 
 BASELINE_FILE="coverage-baseline.txt"
+TARPAULIN_ENGINE="Llvm"
 
 if [ ! -f "$BASELINE_FILE" ]; then
     echo "❌ $BASELINE_FILE not found"
@@ -18,7 +19,7 @@ fi
 echo "📊 Checking coverage (baseline: ${BASELINE}%)..."
 
 # Run tarpaulin and extract coverage from JSON report
-cargo tarpaulin --out Json > /dev/null 2>&1
+cargo tarpaulin --engine "$TARPAULIN_ENGINE" --out Json > /dev/null 2>&1
 
 if [ ! -f "tarpaulin-report.json" ]; then
     echo "⚠️  tarpaulin-report.json not generated (skipping coverage check)"

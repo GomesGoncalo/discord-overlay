@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)](#build--run)
+[![Coverage](https://gomesgoncalo.github.io/discord-overlay/coverage-badge.svg)](.github/workflows/coverage.yml)
 
 A Wayland-native Discord voice overlay for Hyprland, written in Rust.
 
