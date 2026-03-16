@@ -193,8 +193,8 @@ impl PointerHandler for App {
                 Press { button, .. } => {
                     let (x, y) = (event.position.0 as i32, event.position.1 as i32);
 
-                    if !self.compact {
-                        self.handle_button_clicks(x, y);
+                    if !self.compact && self.handle_button_clicks(x, y) {
+                        self.draw(); // immediately show pressed state
                     }
 
                     // In compact mode the whole surface is the drag handle.
@@ -234,6 +234,11 @@ impl PointerHandler for App {
                             debug!("drag released");
                         }
                         self.dragging = false;
+                        if self.mute_held || self.deaf_held {
+                            self.mute_held = false;
+                            self.deaf_held = false;
+                            self.draw(); // restore normal button colors
+                        }
                     }
                 }
                 Axis { vertical, .. } => {
@@ -335,9 +340,13 @@ impl KeyboardHandler for App {
 
 impl App {
     /// Handle clicks on the mute/deafen buttons (non-compact mode only).
-    fn handle_button_clicks(&mut self, x: i32, y: i32) {
+    /// Returns true if any button was hit (for immediate visual feedback).
+    fn handle_button_clicks(&mut self, x: i32, y: i32) -> bool {
+        let mut clicked = false;
         let (bx, by, bw, bh) = button_rects(self.width, 64);
         if x >= bx && x < bx + bw && y >= by && y < by + bh {
+            self.deaf_held = true;
+            clicked = true;
             let new_deaf = !self.discord_deaf;
             debug!(deafen = new_deaf, "deafen button clicked");
             if let Some(ref tx) = self.discord_cmd_tx {
@@ -346,12 +355,15 @@ impl App {
         }
         let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
         if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
+            self.mute_held = true;
+            clicked = true;
             let new_mute = !self.discord_mute;
             debug!(mute = new_mute, "mute button clicked");
             if let Some(ref tx) = self.discord_cmd_tx {
                 let _ = tx.send(discord::DiscordCommand::SetMute(new_mute));
             }
         }
+        clicked
     }
 
     /// Convert the current anchor/margin state to an absolute screen position and

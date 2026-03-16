@@ -55,3 +55,87 @@ impl fmt::Display for RenderError {
 }
 
 impl std::error::Error for RenderError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discord::UserId;
+
+    #[test]
+    fn display_egl_display_not_found() {
+        let e = RenderError::EglDisplayNotFound("no display".into());
+        assert_eq!(format!("{e}"), "EGL display not found: no display");
+    }
+
+    #[test]
+    fn display_egl_config_selection_failed() {
+        let e = RenderError::EglConfigSelectionFailed("bad config".into());
+        assert_eq!(format!("{e}"), "EGL config selection failed: bad config");
+    }
+
+    #[test]
+    fn display_egl_context_creation_failed() {
+        let e = RenderError::EglContextCreationFailed("ctx err".into());
+        assert_eq!(format!("{e}"), "EGL context creation failed: ctx err");
+    }
+
+    #[test]
+    fn display_egl_surface_creation_failed() {
+        let e = RenderError::EglSurfaceCreationFailed("surf err".into());
+        assert_eq!(format!("{e}"), "EGL surface creation failed: surf err");
+    }
+
+    #[test]
+    fn display_shader_compilation_failed() {
+        let e = RenderError::ShaderCompilationFailed {
+            stage: "vertex",
+            log: "undefined var".into(),
+        };
+        assert_eq!(
+            format!("{e}"),
+            "vertex shader compilation failed: undefined var"
+        );
+    }
+
+    #[test]
+    fn display_program_linking_failed() {
+        let e = RenderError::ProgramLinkingFailed("link err".into());
+        assert_eq!(format!("{e}"), "Program linking failed: link err");
+    }
+
+    #[test]
+    fn display_texture_creation_failed() {
+        let e = RenderError::TextureCreationFailed("tex err".into());
+        assert_eq!(format!("{e}"), "Texture creation failed: tex err");
+    }
+
+    #[test]
+    fn display_buffer_creation_failed() {
+        let e = RenderError::BufferCreationFailed("buf err".into());
+        assert_eq!(format!("{e}"), "Buffer creation failed: buf err");
+    }
+
+    #[test]
+    fn display_image_decode_failed() {
+        let e = RenderError::ImageDecodeFailed {
+            user_id: UserId::from("u42"),
+            error: "bad png".into(),
+        };
+        assert_eq!(
+            format!("{e}"),
+            "Failed to decode avatar image for user u42: bad png"
+        );
+    }
+
+    #[test]
+    fn display_font_rendering_failed() {
+        let e = RenderError::FontRenderingFailed("missing glyph".into());
+        assert_eq!(format!("{e}"), "Font rendering failed: missing glyph");
+    }
+
+    #[test]
+    fn render_error_is_std_error() {
+        let e = RenderError::ProgramLinkingFailed("x".into());
+        let _: &dyn std::error::Error = &e;
+    }
+}

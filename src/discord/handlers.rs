@@ -488,4 +488,131 @@ mod tests {
         assert_eq!(subscribe, Some("chan2".to_string()));
         assert_eq!(guild, Some("g2".to_string()));
     }
+
+    // --- None-return paths ---
+
+    #[test]
+    fn get_guild_handler_missing_name_returns_none() {
+        let v = json!({"cmd": "GET_GUILD", "nonce": "get_guild", "data": {}});
+        let h = GetGuildHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn speaking_start_handler_missing_user_id_returns_none() {
+        let v = json!({"evt": "SPEAKING_START", "data": {}});
+        let h = SpeakingStartHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn speaking_end_handler_missing_user_id_returns_none() {
+        let v = json!({"evt": "SPEAKING_END", "data": {}});
+        let h = SpeakingEndHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn voice_state_update_handler_empty_user_id_returns_none() {
+        let v =
+            json!({"evt": "VOICE_STATE_UPDATE", "data": {"user": {"id": ""}, "voice_state": {}}});
+        let h = VoiceStateUpdateHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn voice_state_create_handler_empty_user_id_returns_none() {
+        let v =
+            json!({"evt": "VOICE_STATE_CREATE", "data": {"user": {"id": ""}, "voice_state": {}}});
+        let h = VoiceStateCreateHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn voice_state_delete_handler_missing_user_returns_none() {
+        let v = json!({"evt": "VOICE_STATE_DELETE", "data": {}});
+        let h = VoiceStateDeleteHandler;
+        assert!(h.handle(&v, "", "", None).is_none());
+    }
+
+    #[test]
+    fn voice_channel_select_handler_null_data_returns_empty_participants() {
+        let v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc", "data": null});
+        let h = VoiceChannelSelectHandler;
+        let res = h.handle(&v, "local", "me", None);
+        assert!(res.is_some());
+        let (events, _, subscribe, _) = res.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(subscribe.is_none());
+        match &events[0] {
+            DiscordEvent::VoiceParticipants {
+                participants,
+                channel_name,
+            } => {
+                assert!(participants.is_empty());
+                assert!(channel_name.is_none());
+            }
+            _ => panic!("expected VoiceParticipants"),
+        }
+    }
+
+    // --- extract_self_data fallback (local user not in participant list) ---
+
+    #[test]
+    fn extract_self_data_user_not_found_uses_fallback() {
+        use crate::discord::types::ParticipantBuilder;
+        let participants = vec![ParticipantBuilder::new("other_user", "alice").build()];
+        let (self_data, others) = extract_self_data(&participants, "local", None);
+        assert!(self_data.nick.is_none());
+        assert!(self_data.avatar_hash.is_none());
+        assert!(!self_data.muted);
+        assert!(!self_data.deafened);
+        assert_eq!(others.len(), 1);
+        assert_eq!(others[0].user_id, "other_user");
+    }
+
+    #[test]
+    fn extract_self_data_with_local_avatar_fallback() {
+        use crate::discord::types::ParticipantBuilder;
+        let participants = vec![ParticipantBuilder::new("other_user", "alice").build()];
+        let local_avatar = "avatar_hash".to_string();
+        let (self_data, _) = extract_self_data(&participants, "local", Some(&local_avatar));
+        assert_eq!(self_data.avatar_hash.as_deref(), Some("avatar_hash"));
+    }
+
+    // --- matches() coverage ---
+
+    #[test]
+    fn handler_matches_functions() {
+        let guild_v = json!({"cmd": "GET_GUILD", "nonce": "get_guild"});
+        assert!(GetGuildHandler.matches(&guild_v));
+        assert!(!GetGuildHandler.matches(&json!({"cmd": "OTHER"})));
+
+        let gvsc_v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc"});
+        assert!(VoiceChannelSelectHandler.matches(&gvsc_v));
+
+        let ss_v = json!({"evt": "SPEAKING_START"});
+        assert!(SpeakingStartHandler.matches(&ss_v));
+
+        let se_v = json!({"evt": "SPEAKING_END"});
+        assert!(SpeakingEndHandler.matches(&se_v));
+
+        let vsu_v = json!({"evt": "VOICE_STATE_UPDATE"});
+        assert!(VoiceStateUpdateHandler.matches(&vsu_v));
+
+        let vsc_v = json!({"evt": "VOICE_STATE_CREATE"});
+        assert!(VoiceStateCreateHandler.matches(&vsc_v));
+
+        let vsd_v = json!({"evt": "VOICE_STATE_DELETE"});
+        assert!(VoiceStateDeleteHandler.matches(&vsd_v));
+
+        let vcse_v = json!({"evt": "VOICE_CHANNEL_SELECT"});
+        assert!(VoiceChannelSelectEventHandler.matches(&vcse_v));
+    }
+
+    #[test]
+    fn get_event_handlers_returns_eight() {
+        let handlers = get_event_handlers();
+        assert_eq!(handlers.len(), 8);
+    }
 }

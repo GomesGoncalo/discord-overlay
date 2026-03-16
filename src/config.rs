@@ -275,6 +275,76 @@ mod tests {
 
     #[test]
     #[serial]
+    fn write_default_if_missing_skips_when_exists() {
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp =
+            std::env::temp_dir().join(format!("hypr_cfg_test_skip_{}_{}", std::process::id(), tid));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("XDG_CONFIG_HOME", &tmp);
+        // First call: creates the file
+        Config::write_default_if_missing();
+        let cfg_path = config_path();
+        assert!(cfg_path.exists());
+        let mtime1 = fs::metadata(&cfg_path).unwrap().modified().unwrap();
+        // Second call: file exists, must be a no-op
+        Config::write_default_if_missing();
+        let mtime2 = fs::metadata(&cfg_path).unwrap().modified().unwrap();
+        assert_eq!(mtime1, mtime2, "file should not be rewritten");
+        let _ = fs::remove_dir_all(&tmp);
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    #[serial]
+    fn env_override_client_secret() {
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!(
+            "hypr_cfg_test_secret_{}_{}",
+            std::process::id(),
+            tid
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("XDG_CONFIG_HOME", &tmp);
+        env::set_var("DISCORD_CLIENT_SECRET", "OVERRIDE_SECRET");
+        let cfg = Config::load();
+        assert_eq!(cfg.discord_client_secret, "OVERRIDE_SECRET");
+        env::remove_var("DISCORD_CLIENT_SECRET");
+        let _ = fs::remove_dir_all(tmp);
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn config_path_ends_with_config_toml() {
+        let path = config_path();
+        assert_eq!(path.file_name().unwrap(), "config.toml");
+    }
+
+    #[test]
+    #[serial]
+    fn load_with_retry_exhausted_uses_default() {
+        let tid = format!("{:?}", std::thread::current().id());
+        let tmp = std::env::temp_dir().join(format!(
+            "hypr_cfg_test_retry_{}_{}",
+            std::process::id(),
+            tid
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        env::set_var("XDG_CONFIG_HOME", &tmp);
+        let cfg_path = config_path();
+        if let Some(parent) = cfg_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        // Write invalid TOML so every retry fails
+        fs::write(&cfg_path, "not = [valid toml").unwrap();
+        let cfg = Config::load_with_retry(3);
+        assert_eq!(cfg.opacity, 0.9); // default
+        let _ = fs::remove_file(&cfg_path);
+        let _ = fs::remove_dir_all(&tmp);
+        env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    #[serial]
     fn write_default_parent_blocked() {
         // Create a base temp dir and then make a file where the hypr-overlay
         // directory would be, causing create_dir_all to fail for that parent.

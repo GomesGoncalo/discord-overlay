@@ -185,4 +185,103 @@ mod tests {
         let res = authenticate(&mut a, "TOKEN2");
         assert_eq!(res.unwrap(), "TOKEN2".to_string());
     }
+
+    #[test]
+    fn authenticate_skips_non_auth_frame_then_succeeds() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        // Non-auth frame should be skipped via `Ok(_) => continue`
+        let noise = json!({"nonce": "other", "cmd": "IGNORE", "data": {}});
+        super::super::ipc::write_frame(&mut b, super::super::ipc::OP_FRAME, &noise.to_string())
+            .unwrap();
+        let ok = json!({"nonce": "auth", "cmd": "AUTHENTICATE", "data": {}});
+        super::super::ipc::write_frame(&mut b, super::super::ipc::OP_FRAME, &ok.to_string())
+            .unwrap();
+        let res = authenticate(&mut a, "TOK");
+        assert_eq!(res.unwrap(), "TOK");
+    }
+
+    #[test]
+    fn authenticate_io_error_returns_other() {
+        let (mut a, b) = UnixStream::pair().unwrap();
+        drop(b); // EOF on next read
+        let res = authenticate(&mut a, "TOK");
+        assert!(matches!(res, Err(AuthError::Other)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn try_auth_cached_token_success() {
+        use super::super::ipc::save_token;
+        let tmp = std::env::temp_dir().join("hypr_auth_success_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+        save_token("valid_token", "refresh_token");
+        let cfg = Config {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+        };
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        let ok = json!({"nonce": "auth", "cmd": "AUTHENTICATE", "data": {}});
+        super::super::ipc::write_frame(&mut b, super::super::ipc::OP_FRAME, &ok.to_string())
+            .unwrap();
+        let result = try_auth(&cfg, &mut a);
+        if let Some(orig) = original {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert_eq!(result.as_deref(), Some("valid_token"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn try_auth_cached_token_auth_error_returns_none() {
+        use super::super::ipc::save_token;
+        let tmp = std::env::temp_dir().join("hypr_auth_other_err_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+        save_token("fake_access", "fake_refresh");
+        let cfg = Config {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+        };
+        let (mut a, b) = UnixStream::pair().unwrap();
+        drop(b); // EOF → AuthError::Other → try_auth returns None
+        let result = try_auth(&cfg, &mut a);
+        if let Some(orig) = original {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn try_auth_no_token_authorize_flow_fails_returns_none() {
+        let tmp = std::env::temp_dir().join("hypr_auth_no_token_flow_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(&tmp);
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+        // No token file → try_auth calls authorize_flow
+        let cfg = Config {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+        };
+        let (mut a, b) = UnixStream::pair().unwrap();
+        drop(b); // EOF inside authorize_flow → returns None
+        let result = try_auth(&cfg, &mut a);
+        if let Some(orig) = original {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(result.is_none());
+    }
 }

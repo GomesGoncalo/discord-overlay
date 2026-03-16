@@ -189,6 +189,46 @@ fn parse_participants_empty_array() {
 }
 
 #[test]
+fn parse_voice_state_self_deaf() {
+    use serde_json::json;
+    let vs = json!({
+        "user": {"id": "u7", "username": "grace"},
+        "voice_state": {"self_mute": false, "self_deaf": true, "mute": false, "deaf": false},
+        "mute": false
+    });
+    let p = parse_voice_state(&vs);
+    assert_eq!(p.user_id, "u7");
+    assert!(!p.muted);
+    assert!(p.deafened);
+}
+
+#[test]
+fn subscribe_for_channel_sends_five_frames() {
+    use crate::discord::ipc::read_frame;
+    use std::os::unix::net::UnixStream;
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+    server.set_nonblocking(true).unwrap();
+    let mut nonce = 10u64;
+    subscribe_for_channel(&mut client, "ch_test", &mut nonce);
+    assert_eq!(nonce, 15);
+    // Read all frames back to verify they were written correctly
+    let mut frames = Vec::new();
+    while let Ok((_, v)) = read_frame(&mut server) {
+        frames.push(v);
+    }
+    assert_eq!(frames.len(), 5);
+    let events: Vec<&str> = frames
+        .iter()
+        .map(|f| f["evt"].as_str().unwrap_or(""))
+        .collect();
+    assert!(events.contains(&"SPEAKING_START"));
+    assert!(events.contains(&"SPEAKING_END"));
+    assert!(events.contains(&"VOICE_STATE_CREATE"));
+    assert!(events.contains(&"VOICE_STATE_UPDATE"));
+    assert!(events.contains(&"VOICE_STATE_DELETE"));
+}
+
+#[test]
 fn parse_participants_multiple_with_nicks() {
     let vs1 =
         json!({ "user": {"id": "u1", "username": "bob"}, "voice_state": {}, "nick": "Bobby" });

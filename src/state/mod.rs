@@ -84,6 +84,16 @@ pub struct App {
     // Participant count display
     pub participant_count_tex: Option<(glow::NativeTexture, u32, u32)>,
     pub last_participant_count: usize,
+    // Compact mode overflow badge
+    pub overflow_badge_tex: Option<(glow::NativeTexture, u32, u32)>,
+    pub last_overflow_count: usize,
+    // Ellipsis texture for clipped names
+    pub ellipsis_tex: Option<(glow::NativeTexture, u32, u32)>,
+    // Speaking ring pulse phase (0.0–1.0, advances while anyone is fully speaking)
+    pub speaking_pulse_phase: f32,
+    // Button press held state for visual feedback
+    pub mute_held: bool,
+    pub deaf_held: bool,
 }
 
 /// Parameters for rendering a single participant row.
@@ -152,7 +162,12 @@ impl App {
     /// or after participant count changes while in compact mode.
     pub fn apply_compact_resize(&mut self) {
         if self.compact {
-            let n = self.participants.len().max(1);
+            let total = self.participants.len();
+            let max_compact = self.config.max_visible_rows;
+            let visible = total.min(max_compact);
+            let has_overflow = total > max_compact;
+            let slot_count = if has_overflow { visible + 1 } else { visible };
+            let n = slot_count.max(1);
             let w = (n as u32 * 48 + 16).max(120);
             self.width = w;
             self.height = 48;
@@ -210,6 +225,20 @@ impl App {
             self.ensure_initial_texture(&uid, &name);
         }
 
+        // Compute overflow and update badge texture if count changed
+        let max_compact = self.config.max_visible_rows;
+        let total = self.participants.len();
+        let visible_count = total.min(max_compact);
+        let overflow = total.saturating_sub(max_compact);
+        if overflow != self.last_overflow_count {
+            self.last_overflow_count = overflow;
+            delete_texture_if_present(&*self.egl, &mut self.overflow_badge_tex);
+            if overflow > 0 {
+                self.overflow_badge_tex = self.render_text_tex(&format!("+{overflow}"), 13.0);
+            }
+        }
+        let overflow_tex = self.overflow_badge_tex;
+
         // Call the extracted core drawing routine (testable without Wayland state)
         draw_compact_core(
             &*self.egl,
@@ -217,10 +246,12 @@ impl App {
             self.height,
             self.opacity,
             self.idle_alpha,
-            &self.participants,
+            &self.participants[..visible_count],
             &self.avatar_textures,
             &self.initials_textures,
             self.config.speaking_color,
+            overflow_tex,
+            self.speaking_pulse_phase,
         );
 
         // Entire surface is interactive (acts as drag handle) in compact mode.
@@ -267,8 +298,14 @@ impl App {
             .next()
             .map(|c| c.to_uppercase().to_string())
             .unwrap_or_else(|| "?".to_string());
-        if let Some((tex, w, h)) = self.render_text_tex(&initial, 20.0) {
+        if let Some((tex, w, h)) = self.render_text_tex(&initial, self.config.font_size * 1.43) {
             self.initials_textures.insert(user_id.clone(), (tex, w, h));
+        }
+    }
+
+    fn ensure_ellipsis_tex(&mut self) {
+        if self.ellipsis_tex.is_none() {
+            self.ellipsis_tex = self.render_text_tex("\u{2026}", self.config.font_size);
         }
     }
 
@@ -318,7 +355,8 @@ impl App {
                     if let Some(ref name) = channel_name {
                         if let Some(font) = &self.font {
                             let display = format!("# {name}");
-                            let (pixels, w, h) = render_text_texture(font, &display, 13.0);
+                            let (pixels, w, h) =
+                                render_text_texture(font, &display, self.config.font_size * 0.93);
                             if w > 0 && h > 0 {
                                 let tex = self.egl.upload_texture_wh(&pixels, w, h);
                                 self.channel_name_tex = Some((tex, w, h));
@@ -443,7 +481,7 @@ impl App {
                 if name.is_empty() {
                     self.guild_name = None;
                 } else {
-                    self.guild_name_tex = self.render_text_tex(&name, 11.0);
+                    self.guild_name_tex = self.render_text_tex(&name, self.config.font_size * 0.79);
                     self.guild_name = Some(name);
                 }
                 true
@@ -456,6 +494,9 @@ impl App {
                 delete_texture_if_present(&*self.egl, &mut self.channel_name_tex);
                 delete_texture_if_present(&*self.egl, &mut self.participant_count_tex);
                 self.last_participant_count = usize::MAX;
+                // Clear compact overflow badge
+                delete_texture_if_present(&*self.egl, &mut self.overflow_badge_tex);
+                self.last_overflow_count = usize::MAX;
                 // Clear guild name
                 self.guild_name = None;
                 delete_texture_if_present(&*self.egl, &mut self.guild_name_tex);
@@ -754,9 +795,16 @@ impl App {
         let av_x = 12f32;
         let av_y = params.row_y_f + (row_h as f32 - av_size) * 0.5;
 
-        // Speaking ring — fades in/out via speaking_anim
+        // Speaking ring — fades in/out via speaking_anim, pulses gently when fully on
         if params.speaking_anim > 0.005 {
             let ring = 3.0f32;
+            let sc = self.config.speaking_color;
+            let pulse_factor = if params.speaking_anim > 0.95 {
+                let phi = self.speaking_pulse_phase * std::f32::consts::TAU;
+                0.65 + 0.35 * (0.5 - 0.5 * phi.cos())
+            } else {
+                1.0 // linear during fade-in/out
+            };
             self.egl.draw_rect(
                 av_x - ring,
                 av_y - ring,
@@ -765,18 +813,36 @@ impl App {
                 sw,
                 sh,
                 [
-                    self.config.speaking_color[0],
-                    self.config.speaking_color[1],
-                    self.config.speaking_color[2],
-                    0.9 * params.speaking_anim * row_anim_op,
+                    sc[0],
+                    sc[1],
+                    sc[2],
+                    0.9 * params.speaking_anim * row_anim_op * pulse_factor,
                 ],
                 (av_size + ring * 2.0) * 0.5,
             );
         }
 
+        // Subtle 1px border gives avatars visual grounding against the row background
+        self.egl.draw_rect(
+            av_x - 1.0,
+            av_y - 1.0,
+            av_size + 2.0,
+            av_size + 2.0,
+            sw,
+            sh,
+            [1.0, 1.0, 1.0, 0.15 * row_anim_op],
+            (av_size + 2.0) * 0.5,
+        );
+
         // Avatar or placeholder
         if let Some(&tex) = self.avatar_textures.get(&params.user_id) {
-            let desaturate = if params.deafened { 1.0_f32 } else { 0.0 };
+            let desaturate = if params.deafened {
+                1.0_f32
+            } else if params.muted {
+                0.35
+            } else {
+                0.0
+            };
             self.egl
                 .draw_avatar(av_x, av_y, av_size, sw, sh, tex, row_anim_op, desaturate);
         } else {
@@ -827,11 +893,30 @@ impl App {
         let name_x = av_x + av_size + 8.0;
         let name_w_max = sw - name_x - icons_w;
         if let Some(&(tex, tw, th)) = self.name_textures.get(&params.user_id) {
-            let draw_w = (tw as f32).min(name_w_max);
             let draw_h = th as f32;
             let name_y = params.row_y_f + (row_h as f32 - draw_h) * 0.5;
-            self.egl
-                .draw_icon(name_x, name_y, draw_w, draw_h, sw, sh, tex, name_op);
+            if tw as f32 > name_w_max {
+                self.egl
+                    .draw_icon(name_x, name_y, name_w_max, draw_h, sw, sh, tex, name_op);
+                self.ensure_ellipsis_tex();
+                if let Some((etex, etw, eth)) = self.ellipsis_tex {
+                    let ex = name_x + name_w_max - etw as f32;
+                    let ey = params.row_y_f + (row_h as f32 - eth as f32) * 0.5;
+                    self.egl.draw_icon(
+                        ex,
+                        ey,
+                        etw as f32,
+                        eth as f32,
+                        sw,
+                        sh,
+                        etex,
+                        name_op * 0.85,
+                    );
+                }
+            } else {
+                self.egl
+                    .draw_icon(name_x, name_y, tw as f32, draw_h, sw, sh, tex, name_op);
+            }
         }
 
         // Per-participant mute/deaf icons (right side of row)
@@ -912,19 +997,32 @@ impl App {
         } else {
             op * 0.82
         };
+        let mc = self.config.muted_color;
+        let mute_dim = if self.mute_held { 0.75_f32 } else { 1.0 };
         let mute_base = if effectively_muted {
-            [0.75, 0.15, 0.15, 0.88 * op]
+            [
+                mc[0] * mute_dim,
+                mc[1] * mute_dim,
+                mc[2] * mute_dim,
+                0.88 * op,
+            ]
         } else {
-            [0.12, 0.68, 0.28, mic_alpha]
+            [0.12 * mute_dim, 0.68 * mute_dim, 0.28 * mute_dim, mic_alpha]
         };
         self.egl.draw_rect(
             bx2 as f32, by2 as f32, bw2 as f32, bh2 as f32, sw, sh, mute_base, 10.0,
         );
 
+        let deaf_dim = if self.deaf_held { 0.75_f32 } else { 1.0 };
         let deaf_base = if self.discord_deaf {
-            [0.75, 0.15, 0.15, 0.88 * op]
+            [
+                mc[0] * deaf_dim,
+                mc[1] * deaf_dim,
+                mc[2] * deaf_dim,
+                0.88 * op,
+            ]
         } else {
-            [0.18, 0.36, 0.82, 0.82 * op]
+            [0.18 * deaf_dim, 0.36 * deaf_dim, 0.82 * deaf_dim, 0.82 * op]
         };
         self.egl.draw_rect(
             bx as f32, by as f32, bw as f32, bh as f32, sw, sh, deaf_base, 10.0,
@@ -997,7 +1095,7 @@ impl App {
                     _ => String::new(),
                 };
                 if !label.is_empty() {
-                    let new_tex = self.render_text_tex(&label, 11.0);
+                    let new_tex = self.render_text_tex(&label, self.config.font_size * 0.79);
                     self.scroll_indicator_tex = new_tex;
                 }
             }
@@ -1013,7 +1111,8 @@ impl App {
             delete_texture_if_present(&*self.egl, &mut self.participant_count_tex);
             if count > 0 {
                 let label = format!("{count} in channel");
-                self.participant_count_tex = self.render_text_tex(&label, 11.0);
+                self.participant_count_tex =
+                    self.render_text_tex(&label, self.config.font_size * 0.79);
             }
         }
 
@@ -1055,12 +1154,17 @@ impl App {
         ) in visible.iter().enumerate()
         {
             let _ = abs_idx; // abs_idx available for future use; slot drives layout
-            let slide_offset = (1.0 - anim) * row_h as f32 * 0.35;
+                             // Apply smoothstep easing so rows ease-in-out instead of sliding at constant speed
+            let eased = {
+                let t = *anim;
+                t * t * (3.0 - 2.0 * t)
+            };
+            let slide_offset = (1.0 - eased) * row_h as f32 * 0.35;
             let row_y_f = 64.0_f32 + slot as f32 * row_h as f32 + slide_offset;
 
             let params = ParticipantRowParams {
                 row_y_f,
-                anim: *anim,
+                anim: eased,
                 muted: *muted,
                 deafened: *deafened,
                 speaking_anim: *speaking_anim,
@@ -1115,6 +1219,13 @@ impl App {
                 p.speaking_anim = (p.speaking_anim - speaking_speed).max(0.0);
                 needs_redraw = true;
             }
+        }
+
+        // Advance pulse phase while anyone is fully speaking (period = 0.6s)
+        let any_fully_speaking = self.participants.iter().any(|p| p.speaking_anim > 0.95);
+        if any_fully_speaking {
+            self.speaking_pulse_phase = (self.speaking_pulse_phase + 0.016 / 0.6) % 1.0;
+            needs_redraw = true;
         }
 
         for uid in &to_remove {
@@ -1233,7 +1344,7 @@ impl App {
         if let Some((tex, _, _)) = self.timer_tex.take() {
             self.egl.delete_texture(tex);
         }
-        self.timer_tex = self.render_text_tex(&label, 12.0);
+        self.timer_tex = self.render_text_tex(&label, self.config.font_size * 0.86);
         true
     }
 }
@@ -1285,6 +1396,8 @@ pub(crate) fn draw_compact_core(
     avatar_textures: &HashMap<crate::discord::UserId, glow::NativeTexture>,
     initials_textures: &HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
     speaking_color: [f32; 3],
+    overflow_tex: Option<(glow::NativeTexture, u32, u32)>,
+    speaking_pulse_phase: f32,
 ) {
     let op = opacity * idle_alpha;
     let sw = width as f32;
@@ -1319,6 +1432,12 @@ pub(crate) fn draw_compact_core(
             .unwrap_or(false);
         if speaking {
             let [sr, sg, sb] = speaking_color;
+            let pulse_factor = if p.speaking_anim > 0.95 {
+                let phi = speaking_pulse_phase * std::f32::consts::TAU;
+                0.65 + 0.35 * (0.5 - 0.5 * phi.cos())
+            } else {
+                1.0
+            };
             egl.draw_rect(
                 (x - 2) as f32,
                 (y - 2) as f32,
@@ -1326,12 +1445,30 @@ pub(crate) fn draw_compact_core(
                 (avatar_size + 4) as f32,
                 sw,
                 sh,
-                [sr, sg, sb, slot_op],
+                [sr, sg, sb, slot_op * pulse_factor],
                 (avatar_size as f32 / 2.0) + 2.0,
             );
         }
 
-        let desaturate = if p.deafened { 1.0_f32 } else { 0.0 };
+        // Subtle 1px border gives avatars visual grounding
+        egl.draw_rect(
+            x as f32 - 1.0,
+            y as f32 - 1.0,
+            (avatar_size + 2) as f32,
+            (avatar_size + 2) as f32,
+            sw,
+            sh,
+            [1.0, 1.0, 1.0, 0.15 * slot_op],
+            (avatar_size as f32 + 2.0) * 0.5,
+        );
+
+        let desaturate = if p.deafened {
+            1.0_f32
+        } else if p.muted {
+            0.35
+        } else {
+            0.0
+        };
         if let Some(&tex) = avatar_textures.get(&p.user_id) {
             egl.draw_avatar(
                 x as f32,
@@ -1368,6 +1505,25 @@ pub(crate) fn draw_compact_core(
                 egl.draw_icon(ix, iy, tw as f32, th as f32, sw, sh, tex, slot_op);
             }
         }
+    }
+
+    // Overflow badge: dark circle with "+N" text at the slot after last visible avatar
+    if let Some((tex, tw, th)) = overflow_tex {
+        let badge_x = pad + participants.len() as i32 * 48;
+        let badge_size = avatar_size as f32;
+        egl.draw_rect(
+            badge_x as f32,
+            pad as f32,
+            badge_size,
+            badge_size,
+            sw,
+            sh,
+            [0.2, 0.2, 0.25, 0.8 * op],
+            badge_size * 0.5,
+        );
+        let tx = badge_x as f32 + (badge_size - tw as f32) * 0.5;
+        let ty = pad as f32 + (badge_size - th as f32) * 0.5;
+        egl.draw_icon(tx, ty, tw as f32, th as f32, sw, sh, tex, op * 0.9);
     }
 }
 
@@ -1500,6 +1656,161 @@ mod tests_state_helpers {
             &avatar_textures,
             &initials_textures,
             [0.2, 0.6, 0.2],
+            None,
+            0.0,
+        );
+    }
+
+    #[test]
+    fn draw_compact_core_partial_speaking() {
+        // speaking_until set (so speaking=true) but speaking_anim < 0.95 → else { 1.0 } branch
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
+        let egl = MockEgl::new();
+        let avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let p = ParticipantState {
+            user_id: UserId("u_partial".to_string()),
+            display_name: "Partial".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: Some(Instant::now() + Duration::from_millis(1500)),
+            anim: 1.0,
+            leaving: false,
+            speaking_anim: 0.5, // < 0.95 → pulse factor = 1.0 (else branch)
+        };
+        draw_compact_core(
+            &egl,
+            120,
+            48,
+            1.0,
+            1.0,
+            &[p],
+            &avatar_textures,
+            &initials_textures,
+            [0.3, 0.8, 0.3],
+            None,
+            0.0,
+        );
+    }
+
+    #[test]
+    fn draw_compact_core_with_overflow_badge() {
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        let egl = MockEgl::new();
+        let avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let badge_tex = egl.upload_texture_wh(&[200u8; 4], 20, 10);
+        let p = ParticipantState {
+            user_id: UserId("u_ov".to_string()),
+            display_name: "Overflow".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+            speaking_anim: 0.0,
+        };
+        draw_compact_core(
+            &egl,
+            168,
+            48,
+            1.0,
+            1.0,
+            &[p],
+            &avatar_textures,
+            &initials_textures,
+            [0.2, 0.6, 0.2],
+            Some((badge_tex, 20, 10)),
+            0.0,
+        );
+    }
+
+    #[test]
+    fn draw_compact_core_muted_and_deafened_participants() {
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        let egl = MockEgl::new();
+        let mut avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        let uid_muted = UserId("u_muted".to_string());
+        avatar_textures.insert(uid_muted.clone(), tex);
+        let p_muted = ParticipantState {
+            user_id: uid_muted,
+            display_name: "Muted".to_string(),
+            muted: true,
+            deafened: false,
+            speaking_until: None,
+            anim: 1.0,
+            leaving: false,
+            speaking_anim: 0.0,
+        };
+        let p_deafened = ParticipantState {
+            user_id: UserId("u_deaf".to_string()),
+            display_name: "Deafened".to_string(),
+            muted: false,
+            deafened: true,
+            speaking_until: None,
+            anim: 0.7,
+            leaving: false,
+            speaking_anim: 0.0,
+        };
+        draw_compact_core(
+            &egl,
+            216,
+            48,
+            1.0,
+            1.0,
+            &[p_muted, p_deafened],
+            &avatar_textures,
+            &initials_textures,
+            [0.2, 0.6, 0.2],
+            None,
+            0.0,
+        );
+    }
+
+    #[test]
+    fn draw_compact_core_pulse_phase_half() {
+        // speaking_anim > 0.95 with phase=0.5 → phi=π, cos(π)=-1, factor=1.0
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
+        let egl = MockEgl::new();
+        let avatar_textures: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        let mut initials_textures: HashMap<UserId, (glow::NativeTexture, u32, u32)> =
+            HashMap::new();
+        let tex = egl.upload_texture_wh(&[200u8; 4], 6, 6);
+        initials_textures.insert(UserId("u_pulse".to_string()), (tex, 8, 8));
+        let p = ParticipantState {
+            user_id: UserId("u_pulse".to_string()),
+            display_name: "Pulse".to_string(),
+            muted: false,
+            deafened: false,
+            speaking_until: Some(Instant::now() + Duration::from_millis(1500)),
+            anim: 1.0,
+            leaving: false,
+            speaking_anim: 1.0,
+        };
+        draw_compact_core(
+            &egl,
+            120,
+            48,
+            1.0,
+            1.0,
+            &[p],
+            &avatar_textures,
+            &initials_textures,
+            [0.2, 0.6, 0.2],
+            None,
+            0.5, // phase = 0.5 → peak brightness
         );
     }
 
@@ -1537,6 +1848,8 @@ mod tests_state_helpers {
             &avatar_textures,
             &initials_textures,
             [1.0, 0.3, 0.2],
+            None,
+            0.0,
         );
     }
 }

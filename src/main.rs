@@ -130,7 +130,8 @@ fn main() {
                 let target_alpha = if app.in_channel { 1.0_f32 } else { 0.0_f32 };
                 let animating = app.participants.iter().any(|p| {
                     p.anim < 1.0 || p.leaving || p.speaking_anim > 0.005 && p.speaking_anim < 0.995
-                }) || (app.idle_alpha - target_alpha).abs() > 0.005;
+                }) || app.participants.iter().any(|p| p.speaking_anim > 0.5)
+                    || (app.idle_alpha - target_alpha).abs() > 0.005;
                 let next = if animating {
                     std::time::Duration::from_millis(16)
                 } else {
@@ -214,6 +215,12 @@ fn main() {
         self_user_id: crate::discord::UserId::default(),
         participant_count_tex: None,
         last_participant_count: usize::MAX,
+        overflow_badge_tex: None,
+        last_overflow_count: usize::MAX,
+        ellipsis_tex: None,
+        speaking_pulse_phase: 0.0,
+        mute_held: false,
+        deaf_held: false,
         config: cfg,
     };
 
@@ -268,19 +275,57 @@ fn main() {
                 let new_cfg = Config::load();
                 app.opacity = new_cfg.opacity;
                 app.max_visible_rows = new_cfg.max_visible_rows;
-                // Regenerate participant name textures with (possibly) new font size
+                // Collect data needed for texture regeneration before updating config
                 let participants: Vec<(crate::discord::UserId, String)> = app
                     .participants
                     .iter()
                     .map(|p| (p.user_id.clone(), p.display_name.clone()))
                     .collect();
+                let channel_name = app.channel_name.clone();
+                let guild_name = app.guild_name.clone();
                 app.config = new_cfg;
+                // Regenerate name + initials textures with new font size
                 for (uid, name) in &participants {
                     if let Some((tex, _, _)) = app.name_textures.remove(uid) {
                         app.egl.delete_texture(tex);
                     }
                     app.make_name_texture(uid, name);
+                    if let Some((tex, _, _)) = app.initials_textures.remove(uid) {
+                        app.egl.delete_texture(tex);
+                    }
+                    app.ensure_initial_texture(uid, name);
                 }
+                // Regenerate channel name texture
+                if let Some((tex, _, _)) = app.channel_name_tex.take() {
+                    app.egl.delete_texture(tex);
+                }
+                if let Some(ref name) = channel_name {
+                    let display = format!("# {name}");
+                    app.channel_name_tex =
+                        app.render_text_tex(&display, app.config.font_size * 0.93);
+                }
+                // Regenerate guild name texture
+                if let Some((tex, _, _)) = app.guild_name_tex.take() {
+                    app.egl.delete_texture(tex);
+                }
+                if let Some(ref name) = guild_name {
+                    app.guild_name_tex = app.render_text_tex(name, app.config.font_size * 0.79);
+                }
+                // Reset sentinels so timer, count, scroll indicator regenerate on next draw/tick
+                if let Some((tex, _, _)) = app.timer_tex.take() {
+                    app.egl.delete_texture(tex);
+                }
+                app.last_timer_secs = u32::MAX;
+                app.last_participant_count = usize::MAX;
+                app.last_scroll_state = (usize::MAX, usize::MAX);
+                // Invalidate ellipsis and overflow badge (font-size-dependent)
+                if let Some((tex, _, _)) = app.ellipsis_tex.take() {
+                    app.egl.delete_texture(tex);
+                }
+                if let Some((tex, _, _)) = app.overflow_badge_tex.take() {
+                    app.egl.delete_texture(tex);
+                }
+                app.last_overflow_count = usize::MAX;
                 app.draw();
             }
         })

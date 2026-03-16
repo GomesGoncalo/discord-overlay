@@ -157,4 +157,75 @@ mod tests {
         // Frame: op(4) + len(4) + payload
         assert!(buf.len() >= 8);
     }
+
+    #[test]
+    fn read_frame_oversized_rejected() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u32.to_le_bytes()); // op
+        buf.extend_from_slice(&(MAX_FRAME_LEN as u32 + 1).to_le_bytes()); // len > limit
+        let mut c = Cursor::new(buf);
+        let result = read_frame(&mut c);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn send_cmd_via_socket_pair() {
+        let (mut client, _server) = UnixStream::pair().unwrap();
+        send_cmd(&mut client, serde_json::json!({"cmd": "ping"}));
+        // Should complete without panicking even if the other end is not reading
+    }
+
+    #[test]
+    fn find_socket_exercises_search_paths() {
+        // Discord may or may not be running; either way this exercises get_uid()
+        // and the full socket-search loop. We just verify it doesn't panic.
+        let _result = find_socket();
+    }
+
+    #[test]
+    fn token_path_ends_with_json() {
+        let path = token_path();
+        assert_eq!(path.file_name().unwrap(), "discord-token.json");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn load_token_missing_returns_none() {
+        // Point HOME at a directory that definitely has no token file
+        let tmp = std::env::temp_dir().join("hypr_overlay_no_token_test");
+        // Remove any token leftover from previous runs
+        let token_file = tmp
+            .join(".cache")
+            .join("hypr-overlay")
+            .join("discord-token.json");
+        let _ = std::fs::remove_file(&token_file);
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+        let result = load_token();
+        if let Some(orig) = original {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn save_and_reload_token() {
+        let tmp = std::env::temp_dir().join("hypr_overlay_token_test");
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.to_str().unwrap());
+        save_token("acc_xyz", "ref_xyz");
+        let result = load_token();
+        if let Some(orig) = original {
+            std::env::set_var("HOME", orig);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let (access, refresh) = result.expect("token saved and loaded");
+        assert_eq!(access, "acc_xyz");
+        assert_eq!(refresh, "ref_xyz");
+    }
 }
