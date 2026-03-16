@@ -81,6 +81,9 @@ pub struct App {
     pub ptt_active: bool,
     // Local user identity (set from Ready event)
     pub self_user_id: crate::discord::UserId,
+    // Participant count display
+    pub participant_count_tex: Option<(glow::NativeTexture, u32, u32)>,
+    pub last_participant_count: usize,
 }
 
 /// Parameters for rendering a single participant row.
@@ -89,7 +92,8 @@ struct ParticipantRowParams {
     anim: f32,
     muted: bool,
     deafened: bool,
-    speaking: bool,
+    speaking_anim: f32,
+    is_self: bool,
     user_id: crate::discord::UserId,
     display_name: String,
 }
@@ -450,6 +454,8 @@ impl App {
                 self.in_channel = false;
                 self.channel_name = None;
                 delete_texture_if_present(&*self.egl, &mut self.channel_name_tex);
+                delete_texture_if_present(&*self.egl, &mut self.participant_count_tex);
+                self.last_participant_count = usize::MAX;
                 // Clear guild name
                 self.guild_name = None;
                 delete_texture_if_present(&*self.egl, &mut self.guild_name_tex);
@@ -526,6 +532,31 @@ impl App {
         if let Some((tex, tw, th)) = self.timer_tex {
             self.egl
                 .draw_icon(text_x, 40.0, tw as f32, th as f32, sw, sh, tex, op * 0.55);
+        }
+
+        // Participant count — top-right corner of header
+        if let Some((tex, tw, th)) = self.participant_count_tex {
+            self.egl.draw_icon(
+                sw - tw as f32 - 8.0,
+                6.0,
+                tw as f32,
+                th as f32,
+                sw,
+                sh,
+                tex,
+                op * 0.50,
+            );
+        }
+
+        // PTT indicator dot — bottom-right of header
+        if self.ptt_mode {
+            let dot_color = if self.ptt_active {
+                [0.2, 0.85, 0.4, 0.95 * op] // bright green when transmitting
+            } else {
+                [0.7, 0.4, 0.1, 0.50 * op] // dim amber when silent
+            };
+            self.egl
+                .draw_rect(sw - 14.0, 44.0, 10.0, 10.0, sw, sh, dot_color, 5.0);
         }
     }
 
@@ -664,7 +695,9 @@ impl App {
         sh: f32,
         row_h: u32,
     ) {
-        let row_anim_op = op * params.anim;
+        // Deafened participants are de-emphasized at reduced opacity
+        let deaf_dim = if params.deafened { 0.65 } else { 1.0 };
+        let row_anim_op = op * params.anim * deaf_dim;
 
         // Row background
         self.egl.draw_rect(
@@ -683,8 +716,22 @@ impl App {
             8.0,
         );
 
-        // Speaking tint — subtle color wash over the row background
-        if params.speaking {
+        // Self-user highlight — subtle blue tint so you can spot yourself instantly
+        if params.is_self {
+            self.egl.draw_rect(
+                4.0,
+                params.row_y_f + 4.0,
+                sw - 8.0,
+                row_h as f32 - 8.0,
+                sw,
+                sh,
+                [0.25, 0.45, 1.0, 0.10 * row_anim_op],
+                8.0,
+            );
+        }
+
+        // Speaking tint — subtle color wash, intensity driven by speaking_anim
+        if params.speaking_anim > 0.005 {
             self.egl.draw_rect(
                 4.0,
                 params.row_y_f + 4.0,
@@ -696,7 +743,7 @@ impl App {
                     self.config.speaking_color[0],
                     self.config.speaking_color[1],
                     self.config.speaking_color[2],
-                    0.10 * row_anim_op,
+                    0.10 * params.speaking_anim * row_anim_op,
                 ],
                 8.0,
             );
@@ -707,8 +754,8 @@ impl App {
         let av_x = 12f32;
         let av_y = params.row_y_f + (row_h as f32 - av_size) * 0.5;
 
-        // Speaking ring — active while speaking_until is in the future
-        if params.speaking {
+        // Speaking ring — fades in/out via speaking_anim
+        if params.speaking_anim > 0.005 {
             let ring = 3.0f32;
             self.egl.draw_rect(
                 av_x - ring,
@@ -721,7 +768,7 @@ impl App {
                     self.config.speaking_color[0],
                     self.config.speaking_color[1],
                     self.config.speaking_color[2],
-                    0.9 * row_anim_op,
+                    0.9 * params.speaking_anim * row_anim_op,
                 ],
                 (av_size + ring * 2.0) * 0.5,
             );
@@ -768,7 +815,12 @@ impl App {
             }
         }
 
-        // Name text
+        // Name text — dimmed when muted to match Discord's de-emphasis style
+        let name_op = if params.muted {
+            row_anim_op * 0.65
+        } else {
+            row_anim_op
+        };
         let icon_sz = 16.0f32;
         let icon_gap = 4.0f32;
         let icons_w = icon_sz * 2.0 + icon_gap + 8.0;
@@ -779,7 +831,7 @@ impl App {
             let draw_h = th as f32;
             let name_y = params.row_y_f + (row_h as f32 - draw_h) * 0.5;
             self.egl
-                .draw_icon(name_x, name_y, draw_w, draw_h, sw, sh, tex, row_anim_op);
+                .draw_icon(name_x, name_y, draw_w, draw_h, sw, sh, tex, name_op);
         }
 
         // Per-participant mute/deaf icons (right side of row)
@@ -954,32 +1006,53 @@ impl App {
             self.last_scroll_state = (usize::MAX, usize::MAX);
         }
 
+        // Update participant count texture when count changes
+        let count = self.participants.len();
+        if count != self.last_participant_count {
+            self.last_participant_count = count;
+            delete_texture_if_present(&*self.egl, &mut self.participant_count_tex);
+            if count > 0 {
+                let label = format!("{count} in channel");
+                self.participant_count_tex = self.render_text_tex(&label, 11.0);
+            }
+        }
+
         // Collect visible participant data to avoid re-borrowing self in the loop
-        let visible: Vec<(usize, f32, bool, bool, bool, crate::discord::UserId, String)> = self
+        type VisibleRow = (
+            usize,
+            f32,
+            bool,
+            bool,
+            f32,
+            bool,
+            crate::discord::UserId,
+            String,
+        );
+        let self_id = self.self_user_id.clone();
+        let visible: Vec<VisibleRow> = self
             .participants
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.max_visible_rows)
             .map(|(abs_idx, p)| {
-                let speaking = p
-                    .speaking_until
-                    .map(|t| t > std::time::Instant::now())
-                    .unwrap_or(false);
                 (
                     abs_idx,
                     p.anim,
                     p.muted,
                     p.deafened,
-                    speaking,
+                    p.speaking_anim,
+                    p.user_id == self_id,
                     p.user_id.clone(),
                     p.display_name.clone(),
                 )
             })
             .collect();
 
-        for (slot, (abs_idx, anim, muted, deafened, speaking, user_id, display_name)) in
-            visible.iter().enumerate()
+        for (
+            slot,
+            (abs_idx, anim, muted, deafened, speaking_anim, is_self, user_id, display_name),
+        ) in visible.iter().enumerate()
         {
             let _ = abs_idx; // abs_idx available for future use; slot drives layout
             let slide_offset = (1.0 - anim) * row_h as f32 * 0.35;
@@ -990,7 +1063,8 @@ impl App {
                 anim: *anim,
                 muted: *muted,
                 deafened: *deafened,
-                speaking: *speaking,
+                speaking_anim: *speaking_anim,
+                is_self: *is_self,
                 user_id: user_id.clone(),
                 display_name: display_name.clone(),
             };
@@ -1025,6 +1099,20 @@ impl App {
                 }
             } else if p.anim < 1.0 {
                 p.anim = (p.anim + anim_speed).min(1.0);
+                needs_redraw = true;
+            }
+
+            // Animate speaking ring in/out
+            let target_speaking = p
+                .speaking_until
+                .map(|t| t > std::time::Instant::now())
+                .unwrap_or(false);
+            let speaking_speed = anim_speed * 1.5; // slightly faster than join/leave
+            if target_speaking && p.speaking_anim < 1.0 {
+                p.speaking_anim = (p.speaking_anim + speaking_speed).min(1.0);
+                needs_redraw = true;
+            } else if !target_speaking && p.speaking_anim > 0.0 {
+                p.speaking_anim = (p.speaking_anim - speaking_speed).max(0.0);
                 needs_redraw = true;
             }
         }
@@ -1138,9 +1226,9 @@ impl App {
         let m = (elapsed % 3600) / 60;
         let s = elapsed % 60;
         let label = if h > 0 {
-            format!("{h}:{m:02}:{s:02}")
+            format!("\u{2022} {h}:{m:02}:{s:02}")
         } else {
-            format!("{m}:{s:02}")
+            format!("\u{2022} {m}:{s:02}")
         };
         if let Some((tex, _, _)) = self.timer_tex.take() {
             self.egl.delete_texture(tex);
@@ -1207,6 +1295,18 @@ pub(crate) fn draw_compact_core(
 
     let avatar_size = 40u32;
     let pad = 4i32;
+
+    // Dark pill background behind the whole avatar strip
+    egl.draw_rect(
+        0.0,
+        0.0,
+        sw,
+        sh,
+        sw,
+        sh,
+        [0.08, 0.09, 0.11, 0.72 * op],
+        (sh * 0.5).min(16.0),
+    );
 
     for (i, p) in participants.iter().enumerate() {
         let x = pad + i as i32 * 48;
@@ -1387,6 +1487,7 @@ mod tests_state_helpers {
             speaking_until: None,
             anim: 1.0,
             leaving: false,
+            speaking_anim: 0.0,
         };
         // Should not panic
         draw_compact_core(
@@ -1423,6 +1524,7 @@ mod tests_state_helpers {
             ),
             anim: 1.0,
             leaving: false,
+            speaking_anim: 1.0,
         };
         // Should not panic and should exercise speaking + initials path
         draw_compact_core(
@@ -1453,6 +1555,7 @@ mod tests_discord_events {
             speaking_until: None,
             anim: 1.0,
             leaving: false,
+            speaking_anim: 0.0,
         };
         assert!(_p.user_id == "test");
         assert_eq!(_p.display_name, "Test User");
@@ -1471,6 +1574,7 @@ mod tests_discord_events {
             speaking_until: None,
             anim: 1.0,
             leaving: false,
+            speaking_anim: 0.0,
         };
         let now = std::time::Instant::now();
         p.speaking_until = Some(now);
@@ -1487,6 +1591,7 @@ mod tests_discord_events {
             speaking_until: None,
             anim: 1.0,
             leaving: false,
+            speaking_anim: 0.0,
         };
         p.leaving = true;
         assert!(p.leaving);
