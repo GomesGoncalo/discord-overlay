@@ -5,7 +5,7 @@
 
 use crate::discord::{DiscordEvent, UserId};
 use std::io::Read;
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// Fetch avatar from Discord CDN and send decoded RGBA data via channel.
 ///
@@ -13,9 +13,12 @@ use tracing::warn;
 /// Handles HTTP fetch, PNG decode, and format conversion.
 /// Failures are logged but not propagated (avatars are optional).
 pub fn fetch_and_send(user_id: UserId, hash: String, tx: calloop::channel::Sender<DiscordEvent>) {
+    let span = tracing::debug_span!("avatar_fetch", %user_id);
     std::thread::spawn(move || {
+        let _enter = span.entered();
         let base = base_url();
         let url = format!("{}/{}/{}.png?size=64", base, user_id, hash);
+        debug!("fetching avatar");
         match ureq::get(&url).call() {
             Ok(resp) => {
                 let mut buf = Vec::new();
@@ -26,32 +29,27 @@ pub fn fetch_and_send(user_id: UserId, hash: String, tx: calloop::channel::Sende
                             let (w, _h) = rgba.dimensions();
                             let size = w;
                             if size > 0 {
+                                debug!(size, "avatar decoded and uploaded");
                                 let _ = tx.send(DiscordEvent::AvatarLoaded {
                                     user_id,
                                     rgba: rgba.into_raw(),
                                     size,
                                 });
                             } else {
-                                warn!("Avatar for user {} has zero dimensions", user_id);
+                                warn!("avatar has zero dimensions");
                             }
                         }
                         Err(e) => {
-                            warn!("Failed to decode avatar image for user {}: {}", user_id, e);
+                            warn!("failed to decode avatar image: {e}");
                         }
                     },
                     Err(e) => {
-                        warn!(
-                            "Failed to read avatar HTTP response for user {}: {}",
-                            user_id, e
-                        );
+                        warn!("failed to read avatar HTTP response: {e}");
                     }
                 }
             }
             Err(e) => {
-                warn!(
-                    "Failed to fetch avatar for user {} from {}: {}",
-                    user_id, url, e
-                );
+                warn!(%url, "failed to fetch avatar: {e}");
             }
         }
     });

@@ -32,7 +32,7 @@ use config::Config;
 use render::EglContext;
 use render::{load_system_font, EglBackend};
 use state::App;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 fn main() {
     use tracing_subscriber::{fmt, EnvFilter};
@@ -103,134 +103,27 @@ fn main() {
         })
         .unwrap();
 
-    // Combined animation + speaking-expiry tick
+    // Combined animation + speaking-expiry tick (~180ms join/leave, 250ms idle fade)
     loop_handle
         .insert_source(
             calloop::timer::Timer::from_duration(std::time::Duration::from_millis(16)),
             |_, _, app| {
                 let now = std::time::Instant::now();
+                // anim_speed: full travel in ~180ms at a 16ms tick rate
+                const ANIM_SPEED: f32 = 0.016 / 0.18;
+
                 let mut needs_redraw = false;
-
-                // Animate participant rows (~180ms to fully appear/disappear)
-                let anim_speed = 0.016_f32 / 0.18;
-                let mut to_remove: Vec<crate::discord::UserId> = Vec::new();
-                for p in &mut app.participants {
-                    if p.leaving {
-                        p.anim = (p.anim - anim_speed).max(0.0);
-                        needs_redraw = true;
-                        if p.anim <= 0.0 {
-                            to_remove.push(p.user_id.clone());
-                        }
-                    } else if p.anim < 1.0 {
-                        p.anim = (p.anim + anim_speed).min(1.0);
-                        needs_redraw = true;
-                    }
-                }
-                // Remove fully-animated-out participants and clean up textures
-                for uid in &to_remove {
-                    if let Some(pos) = app.participants.iter().position(|p| &p.user_id == uid) {
-                        let name = app.participants[pos].display_name.clone();
-                        debug!("{name} removed from list");
-                        app.participants.remove(pos);
-                        if let Some((tex, _, _)) = app.name_textures.remove(uid) {
-                            app.egl.delete_texture(tex);
-                        }
-                        if let Some((tex, _, _)) = app.initials_textures.remove(uid) {
-                            app.egl.delete_texture(tex);
-                        }
-                        if let Some(tex) = app.avatar_textures.remove(uid) {
-                            app.egl.delete_texture(tex);
-                        }
-                    }
-                }
-                if !to_remove.is_empty() {
-                    // Clamp scroll offset when participants are removed
-                    let max_offset = app.participants.len().saturating_sub(app.max_visible_rows);
-                    app.scroll_offset = app.scroll_offset.min(max_offset);
-                    let new_h = app.compute_overlay_height();
-                    app.resize_overlay(new_h);
-                    if app.compact {
-                        app.apply_compact_resize();
-                    }
-                    needs_redraw = true;
-                }
-
-                // Expire speaking rings
-                let any_expired = app
-                    .participants
-                    .iter()
-                    .any(|p| p.speaking_until.map(|t| t <= now).unwrap_or(false));
-                if any_expired {
-                    for p in &mut app.participants {
-                        if p.speaking_until.map(|t| t <= now).unwrap_or(false) {
-                            p.speaking_until = None;
-                        }
-                    }
-                    needs_redraw = true;
-                }
-
-                // Update ptt_active: true while the local user is speaking (PTT key held)
-                if app.ptt_mode {
-                    let self_speaking = app.participants.iter().any(|p| {
-                        p.user_id == app.self_user_id
-                            && p.speaking_until.map(|t| t > now).unwrap_or(false)
-                    });
-                    if app.ptt_active != self_speaking {
-                        app.ptt_active = self_speaking;
-                        needs_redraw = true;
-                    }
-                }
-
-                // Animate idle alpha (~250ms transition)
-                // Target is 1.0 when in channel, 0.0 when not (fully hidden)
-                let target_alpha = if app.in_channel { 1.0_f32 } else { 0.0_f32 };
-                if (app.idle_alpha - target_alpha).abs() > 0.005 {
-                    let speed = 0.016 / 0.25;
-                    if app.idle_alpha < target_alpha {
-                        app.idle_alpha = (app.idle_alpha + speed).min(target_alpha);
-                    } else {
-                        app.idle_alpha = (app.idle_alpha - speed).max(target_alpha);
-                    }
-                    needs_redraw = true;
-                    debug!(
-                        "TIMER: Animating idle_alpha toward {:.2}, now {:.2}",
-                        target_alpha, app.idle_alpha
-                    );
-                }
-
-                // When fully hidden, clear the input region so no mouse events are consumed
-                if !app.in_channel && app.idle_alpha <= 0.005 && app.idle_alpha > -0.001 {
-                    debug!("TIMER: Clearing input region (fully hidden)");
-                    app.clear_input_region();
-                }
-
-                // Update session timer texture every second
-                if let Some(joined_at) = app.channel_joined_at {
-                    let elapsed = joined_at.elapsed().as_secs() as u32;
-                    if elapsed != app.last_timer_secs {
-                        app.last_timer_secs = elapsed;
-                        let h = elapsed / 3600;
-                        let m = (elapsed % 3600) / 60;
-                        let s = elapsed % 60;
-                        let label = if h > 0 {
-                            format!("{h}:{m:02}:{s:02}")
-                        } else {
-                            format!("{m}:{s:02}")
-                        };
-                        if let Some((tex, _, _)) = app.timer_tex.take() {
-                            app.egl.delete_texture(tex);
-                        }
-                        let new_tex = app.render_text_tex(&label, 12.0);
-                        app.timer_tex = new_tex;
-                        needs_redraw = true;
-                    }
-                }
+                needs_redraw |= app.tick_animations(ANIM_SPEED);
+                needs_redraw |= app.tick_speaking_expiry(now);
+                needs_redraw |= app.tick_ptt(now);
+                needs_redraw |= app.tick_idle_alpha();
+                needs_redraw |= app.tick_timer();
 
                 if needs_redraw {
-                    debug!("TIMER: needs_redraw=true, calling draw()");
+                    trace!("timer tick: redrawing");
                     app.draw();
                 } else {
-                    debug!("TIMER: no redraw needed");
+                    trace!("timer tick: no redraw needed");
                 }
 
                 // Run at 16ms when animating, 500ms when idle or just tracking timer

@@ -20,6 +20,8 @@ use sctk::{
 };
 use smithay_client_toolkit as sctk;
 
+use tracing::{debug, trace};
+
 use crate::discord;
 use crate::state::App;
 
@@ -192,25 +194,9 @@ impl PointerHandler for App {
                     let (x, y) = (event.position.0 as i32, event.position.1 as i32);
 
                     if !self.compact {
-                        let (bx, by, bw, bh) = button_rects(self.width, 64);
-                        if x >= bx && x < bx + bw && y >= by && y < by + bh {
-                            // Deafen button
-                            if let Some(ref tx) = self.discord_cmd_tx {
-                                let _ =
-                                    tx.send(discord::DiscordCommand::SetDeaf(!self.discord_deaf));
-                            }
-                        }
-                        let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
-                        if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
-                            // Mute button
-                            if let Some(ref tx) = self.discord_cmd_tx {
-                                let _ =
-                                    tx.send(discord::DiscordCommand::SetMute(!self.discord_mute));
-                            }
-                        }
+                        self.handle_button_clicks(x, y);
                     }
 
-                    // Determine if the click lands on the drag handle area.
                     // In compact mode the whole surface is the drag handle.
                     let on_drag_handle = if self.compact {
                         button == BTN_LEFT
@@ -221,16 +207,16 @@ impl PointerHandler for App {
 
                     if on_drag_handle {
                         // Double-click within 400 ms toggles compact mode
-                        let now = std::time::Instant::now();
                         let is_double_click = self
                             .last_click_time
                             .map(|t| t.elapsed() < std::time::Duration::from_millis(400))
                             .unwrap_or(false);
-                        self.last_click_time = Some(now);
+                        self.last_click_time = Some(std::time::Instant::now());
 
                         if is_double_click {
                             self.compact = !self.compact;
-                            self.dragging = false; // cancel any in-progress drag
+                            debug!(compact = self.compact, "compact mode toggled");
+                            self.dragging = false;
                             self.last_click_time = None;
                             self.apply_compact_resize();
                             self.clear_input_region();
@@ -238,66 +224,21 @@ impl PointerHandler for App {
                             return;
                         }
 
-                        // Compute absolute surface position for drag reference
-                        let outputs: Vec<_> = self
-                            .layer
-                            .wl_surface()
-                            .data::<SurfaceData>()
-                            .map(|d| d.outputs().collect())
-                            .unwrap_or_default();
-                        if let Some(output) = outputs.first() {
-                            let out = output.clone();
-                            if let Some(info) = self.output_state.info(&out) {
-                                let out_pos = info.logical_position.unwrap_or((0, 0));
-                                let out_size = info.logical_size.unwrap_or((1920, 1080));
-                                let out_scale = info.scale_factor;
-
-                                let (top, right, bottom, left) = self.margins;
-                                let surf_scale = self
-                                    .layer
-                                    .wl_surface()
-                                    .data::<SurfaceData>()
-                                    .map(|d| d.scale_factor())
-                                    .unwrap_or(1);
-                                let surf_w = self.width as i32 * surf_scale;
-                                let surf_h = self.height as i32 * surf_scale;
-
-                                let out_pos_px = (out_pos.0 * out_scale, out_pos.1 * out_scale);
-                                let out_size_px = (out_size.0 * out_scale, out_size.1 * out_scale);
-
-                                let abs_left = if self.anchor.contains(Anchor::RIGHT) {
-                                    out_pos_px.0 + out_size_px.0 - right - surf_w
-                                } else {
-                                    out_pos_px.0 + left
-                                };
-                                let abs_top = if self.anchor.contains(Anchor::BOTTOM) {
-                                    out_pos_px.1 + out_size_px.1 - bottom - surf_h
-                                } else {
-                                    out_pos_px.1 + top
-                                };
-
-                                self.anchor = Anchor::TOP | Anchor::LEFT;
-                                self.layer.set_anchor(self.anchor);
-                                let top_m = (abs_top - out_pos_px.1) / out_scale;
-                                let left_m = (abs_left - out_pos_px.0) / out_scale;
-                                self.layer.set_margin(top_m, 0, 0, left_m);
-                                self.drag_base_pos = (abs_left, abs_top);
-                                self.drag_output = Some(out);
-                            }
-                        }
-                        self.dragging = true;
-                        self.last_pointer = (x, y);
-                        self.draw();
+                        self.start_drag(x, y);
                     }
                 }
 
                 Release { button, .. } => {
-                    if button == BTN_LEFT {
+                    if button == BTN_LEFT && self.dragging {
+                        debug!("drag released");
+                        self.dragging = false;
+                    } else if button == BTN_LEFT {
                         self.dragging = false;
                     }
                 }
                 Axis { vertical, .. } => {
                     let delta = -vertical.absolute as f32 * 0.02;
+                    trace!(delta, pointer_y = self.last_pointer_y, "scroll event");
                     if self.last_pointer_y > 64.0 && !self.participants.is_empty() {
                         // Scroll participant list: wheel-down increases offset (show further down)
                         if delta < 0.0 {
@@ -387,6 +328,85 @@ impl KeyboardHandler for App {
         _: &WlKeyboard,
         _: RepeatInfo,
     ) {
+    }
+}
+
+// ─── Pointer helper methods ───────────────────────────────────────────────────
+
+impl App {
+    /// Handle clicks on the mute/deafen buttons (non-compact mode only).
+    fn handle_button_clicks(&mut self, x: i32, y: i32) {
+        let (bx, by, bw, bh) = button_rects(self.width, 64);
+        if x >= bx && x < bx + bw && y >= by && y < by + bh {
+            let new_deaf = !self.discord_deaf;
+            debug!(deafen = new_deaf, "deafen button clicked");
+            if let Some(ref tx) = self.discord_cmd_tx {
+                let _ = tx.send(discord::DiscordCommand::SetDeaf(new_deaf));
+            }
+        }
+        let (bx2, by2, bw2, bh2) = button2_rects(self.width, 64);
+        if x >= bx2 && x < bx2 + bw2 && y >= by2 && y < by2 + bh2 {
+            let new_mute = !self.discord_mute;
+            debug!(mute = new_mute, "mute button clicked");
+            if let Some(ref tx) = self.discord_cmd_tx {
+                let _ = tx.send(discord::DiscordCommand::SetMute(new_mute));
+            }
+        }
+    }
+
+    /// Convert the current anchor/margin state to an absolute screen position and
+    /// begin a drag. `(x, y)` are the surface-local pointer coordinates at press time.
+    fn start_drag(&mut self, x: i32, y: i32) {
+        let outputs: Vec<_> = self
+            .layer
+            .wl_surface()
+            .data::<SurfaceData>()
+            .map(|d| d.outputs().collect())
+            .unwrap_or_default();
+        if let Some(output) = outputs.first() {
+            let out = output.clone();
+            if let Some(info) = self.output_state.info(&out) {
+                let out_pos = info.logical_position.unwrap_or((0, 0));
+                let out_size = info.logical_size.unwrap_or((1920, 1080));
+                let out_scale = info.scale_factor;
+
+                let (top, right, bottom, left) = self.margins;
+                let surf_scale = self
+                    .layer
+                    .wl_surface()
+                    .data::<SurfaceData>()
+                    .map(|d| d.scale_factor())
+                    .unwrap_or(1);
+                let surf_w = self.width as i32 * surf_scale;
+                let surf_h = self.height as i32 * surf_scale;
+
+                let out_pos_px = (out_pos.0 * out_scale, out_pos.1 * out_scale);
+                let out_size_px = (out_size.0 * out_scale, out_size.1 * out_scale);
+
+                let abs_left = if self.anchor.contains(Anchor::RIGHT) {
+                    out_pos_px.0 + out_size_px.0 - right - surf_w
+                } else {
+                    out_pos_px.0 + left
+                };
+                let abs_top = if self.anchor.contains(Anchor::BOTTOM) {
+                    out_pos_px.1 + out_size_px.1 - bottom - surf_h
+                } else {
+                    out_pos_px.1 + top
+                };
+
+                self.anchor = Anchor::TOP | Anchor::LEFT;
+                self.layer.set_anchor(self.anchor);
+                let top_m = (abs_top - out_pos_px.1) / out_scale;
+                let left_m = (abs_left - out_pos_px.0) / out_scale;
+                self.layer.set_margin(top_m, 0, 0, left_m);
+                self.drag_base_pos = (abs_left, abs_top);
+                self.drag_output = Some(out);
+            }
+        }
+        debug!(x, y, "drag started");
+        self.dragging = true;
+        self.last_pointer = (x, y);
+        self.draw();
     }
 }
 
