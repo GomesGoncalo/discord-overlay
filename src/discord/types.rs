@@ -221,3 +221,90 @@ impl ParticipantBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn userid_as_str() {
+        let id = UserId("hello".to_string());
+        assert_eq!(id.as_str(), "hello");
+    }
+
+    #[test]
+    fn userid_from_string() {
+        let id: UserId = String::from("abc").into();
+        assert_eq!(id, "abc");
+    }
+
+    #[test]
+    fn userid_from_str_ref() {
+        let id: UserId = "xyz".into();
+        assert_eq!(id, "xyz");
+    }
+
+    #[test]
+    fn userid_partial_eq_string() {
+        let id = UserId("foo".to_string());
+        assert_eq!(id, "foo".to_string());
+    }
+
+    #[test]
+    fn userid_ref_partial_eq_str() {
+        let id = UserId("bar".to_string());
+        assert_eq!(&id, "bar");
+    }
+
+    #[test]
+    fn get_nested_success() {
+        let v = json!({"a": {"b": "found"}});
+        let result = v.get_nested(&["a", "b"]);
+        assert_eq!(result.unwrap().as_str(), Some("found"));
+    }
+
+    #[test]
+    fn get_nested_missing_key() {
+        let v = json!({"a": {"b": "found"}});
+        assert!(v.get_nested(&["a", "c"]).is_none());
+    }
+
+    #[test]
+    fn get_nested_empty_path() {
+        let v = json!({"x": 1});
+        // Empty path — returns the root value unchanged
+        assert!(v.get_nested(&[]).is_some());
+    }
+
+    #[test]
+    fn get_bool_with_default() {
+        let v = json!({"flag": "not-a-bool"});
+        assert!(v.get_bool("flag", true)); // non-bool → default
+        assert!(!v.get_bool("missing", false)); // missing → default
+    }
+
+    #[test]
+    fn participant_builder_full() {
+        let p = ParticipantBuilder::new("u1", "alice")
+            .nick(Some("Alice".to_string()))
+            .avatar_hash(Some("hash123".to_string()))
+            .muted(true)
+            .deafened(true)
+            .build();
+        assert_eq!(p.user_id, "u1");
+        assert_eq!(p.username, "alice");
+        assert_eq!(p.nick.as_deref(), Some("Alice"));
+        assert_eq!(p.avatar_hash.as_deref(), Some("hash123"));
+        assert!(p.muted);
+        assert!(p.deafened);
+    }
+
+    #[test]
+    fn participant_builder_empty_avatar_hash_filtered() {
+        let p = ParticipantBuilder::new("u2", "bob")
+            .avatar_hash(Some(String::new()))
+            .build();
+        assert!(p.avatar_hash.is_none());
+    }
+}

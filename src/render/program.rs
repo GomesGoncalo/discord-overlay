@@ -243,6 +243,25 @@ mod tests {
     }
 
     #[test]
+    fn opacity_program_use_and_id() {
+        let mock = MockGl::new();
+        let prog =
+            unsafe { OpacityProgram::<MockGl>::new(&mock, "void main() {}", "void main() {}") };
+        let id = prog.id();
+        unsafe { prog.use_program(&mock) };
+        assert!(mock.used_programs.borrow().contains(&id));
+    }
+
+    #[test]
+    fn main_program_locs_accessible() {
+        let mock = MockGl::new();
+        let prog = unsafe { MainProgram::<MockGl>::new(&mock, "void main() {}", "void main() {}") };
+        let locs = prog.locs();
+        // loc_color is mapped to 10 by MockGl
+        assert_eq!(locs.loc_color, 10);
+    }
+
+    #[test]
     fn main_and_opacity_program_setters() {
         let mock = MockGl::new();
         let main_prog =

@@ -646,4 +646,28 @@ mod tests {
         let (events, _, _, _) = process_frame_events(&v, "local", "me", None);
         assert!(events.is_empty());
     }
+
+    #[test]
+    fn subscribe_initial_sends_four_frames() {
+        use super::super::ipc::read_frame;
+        use std::os::unix::net::UnixStream;
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        server.set_nonblocking(true).unwrap();
+        subscribe_initial(&mut client);
+        let mut frames = Vec::new();
+        while let Ok((_, v)) = read_frame(&mut server) {
+            frames.push(v);
+        }
+        assert_eq!(frames.len(), 4);
+        let cmds: Vec<&str> = frames
+            .iter()
+            .map(|f| f["cmd"].as_str().unwrap_or(""))
+            .collect();
+        assert!(cmds.contains(&"GET_VOICE_SETTINGS"));
+        assert!(cmds.iter().filter(|&&c| c == "SUBSCRIBE").count() == 2);
+        assert!(cmds.contains(&"GET_SELECTED_VOICE_CHANNEL"));
+        let evts: Vec<&str> = frames.iter().filter_map(|f| f["evt"].as_str()).collect();
+        assert!(evts.contains(&"VOICE_SETTINGS_UPDATE"));
+        assert!(evts.contains(&"VOICE_CHANNEL_SELECT"));
+    }
 }
