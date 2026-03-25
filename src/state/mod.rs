@@ -1561,16 +1561,7 @@ impl App {
         for (uid, secs, is_speaking, last_spoke_at) in user_data {
             // Idle label takes priority when the participant is quiet for ≥ 60 s.
             let idle_label: Option<String> = if !is_speaking {
-                last_spoke_at.and_then(|t| {
-                    let s = t.elapsed().as_secs();
-                    if s < 60 {
-                        None
-                    } else if s < 3600 {
-                        Some(format!("{}m ago", s / 60))
-                    } else {
-                        Some(format!("{}h ago", s / 3600))
-                    }
-                })
+                last_spoke_at.and_then(|t| idle_label_for_elapsed(t.elapsed().as_secs()))
             } else {
                 None
             };
@@ -1622,14 +1613,7 @@ impl App {
             if let Some((old_tex, _, _)) = self.talk_time_textures.remove(&uid) {
                 self.egl.delete_texture(old_tex);
             }
-            let h = secs / 3600;
-            let m = (secs % 3600) / 60;
-            let s = secs % 60;
-            let label = if h > 0 {
-                format!("{h}:{m:02}:{s:02}")
-            } else {
-                format!("{m}:{s:02}")
-            };
+            let label = format_talk_time(secs);
             if let Some(tex_data) = self.render_text_tex(&label, self.config.font_size * 0.78) {
                 self.talk_time_textures.insert(uid.clone(), tex_data);
                 self.last_talk_time_secs.insert(uid, secs);
@@ -1920,6 +1904,31 @@ fn compute_stddev(samples: &[u32]) -> u32 {
         .sum::<f64>()
         / n;
     variance.sqrt().round() as u32
+}
+
+/// Format accumulated talk time (in seconds) as a compact display string.
+/// Under one hour: "M:SS"; one hour or more: "H:MM:SS".
+fn format_talk_time(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Format elapsed silence as an idle label, or return None if < 60 s.
+/// Used by `tick_talk_time_textures` and tested directly.
+fn idle_label_for_elapsed(elapsed_secs: u64) -> Option<String> {
+    if elapsed_secs < 60 {
+        None
+    } else if elapsed_secs < 3600 {
+        Some(format!("{}m ago", elapsed_secs / 60))
+    } else {
+        Some(format!("{}h ago", elapsed_secs / 3600))
+    }
 }
 
 #[cfg(test)]
@@ -2350,34 +2359,90 @@ mod tests_state_helpers {
         assert!((talk_ratio(110, 100) - 1.0).abs() < 1e-6);
     }
 
-    // ── idle_label format ────────────────────────────────────────────────────
+    // ── format_talk_time ─────────────────────────────────────────────────────
 
-    fn idle_label(elapsed_secs: u64) -> Option<String> {
-        if elapsed_secs < 60 {
-            None
-        } else if elapsed_secs < 3600 {
-            Some(format!("{}m ago", elapsed_secs / 60))
-        } else {
-            Some(format!("{}h ago", elapsed_secs / 3600))
-        }
+    #[test]
+    fn format_talk_time_under_one_minute() {
+        assert_eq!(format_talk_time(0), "0:00");
+        assert_eq!(format_talk_time(59), "0:59");
     }
 
     #[test]
+    fn format_talk_time_minutes_and_seconds() {
+        assert_eq!(format_talk_time(90), "1:30");
+        assert_eq!(format_talk_time(3599), "59:59");
+    }
+
+    #[test]
+    fn format_talk_time_hours() {
+        assert_eq!(format_talk_time(3600), "1:00:00");
+        assert_eq!(format_talk_time(3661), "1:01:01");
+        assert_eq!(format_talk_time(7384), "2:03:04");
+    }
+
+    // ── idle_label_for_elapsed ───────────────────────────────────────────────
+
+    #[test]
     fn idle_label_below_threshold_returns_none() {
-        assert!(idle_label(30).is_none());
-        assert!(idle_label(59).is_none());
+        assert!(idle_label_for_elapsed(30).is_none());
+        assert!(idle_label_for_elapsed(59).is_none());
     }
 
     #[test]
     fn idle_label_format_minutes() {
-        assert_eq!(idle_label(65), Some("1m ago".to_string()));
-        assert_eq!(idle_label(120), Some("2m ago".to_string()));
+        assert_eq!(idle_label_for_elapsed(65), Some("1m ago".to_string()));
+        assert_eq!(idle_label_for_elapsed(120), Some("2m ago".to_string()));
     }
 
     #[test]
     fn idle_label_format_hours() {
-        assert_eq!(idle_label(3700), Some("1h ago".to_string()));
-        assert_eq!(idle_label(7200), Some("2h ago".to_string()));
+        assert_eq!(idle_label_for_elapsed(3700), Some("1h ago".to_string()));
+        assert_eq!(idle_label_for_elapsed(7200), Some("2h ago".to_string()));
+    }
+
+    // ── texture deletion helpers ─────────────────────────────────────────────
+
+    #[test]
+    fn delete_texture_if_present_with_some() {
+        use crate::render::MockEgl;
+        let egl = MockEgl::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        let mut opt: Option<(glow::NativeTexture, u32, u32)> = Some((tex, 1, 1));
+        delete_texture_if_present(&egl, &mut opt);
+        assert!(opt.is_none());
+    }
+
+    #[test]
+    fn delete_texture_if_present_with_none() {
+        use crate::render::MockEgl;
+        let egl = MockEgl::new();
+        let mut opt: Option<(glow::NativeTexture, u32, u32)> = None;
+        delete_texture_if_present(&egl, &mut opt); // should not panic
+        assert!(opt.is_none());
+    }
+
+    #[test]
+    fn delete_all_textures_in_map_drains() {
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        let egl = MockEgl::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        let mut map: HashMap<UserId, (glow::NativeTexture, u32, u32)> = HashMap::new();
+        map.insert(UserId("u1".to_string()), (tex, 1, 1));
+        delete_all_textures_in_map(&egl, &mut map);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn delete_all_avatar_textures_drains() {
+        use crate::discord::UserId;
+        use crate::render::MockEgl;
+        let egl = MockEgl::new();
+        let tex = egl.upload_texture_wh(&[255u8; 4], 1, 1);
+        let mut map: HashMap<UserId, glow::NativeTexture> = HashMap::new();
+        map.insert(UserId("u2".to_string()), tex);
+        delete_all_avatar_textures(&egl, &mut map);
+        assert!(map.is_empty());
     }
 }
 
