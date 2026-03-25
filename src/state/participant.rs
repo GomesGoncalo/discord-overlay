@@ -14,6 +14,22 @@ pub struct ParticipantState {
     pub leaving: bool,
     /// Speaking ring pulse: animates 0→1 when speaking, 1→0 when silence detected.
     pub speaking_anim: f32,
+    /// Accumulated talk time from all completed speaking segments.
+    pub talk_time: std::time::Duration,
+    /// Instant when the current speaking segment started (None if not speaking).
+    pub speaking_started_at: Option<std::time::Instant>,
+}
+
+impl ParticipantState {
+    /// Total talk time including any currently-active speaking segment.
+    pub fn current_talk_secs(&self) -> u64 {
+        let base = self.talk_time.as_secs();
+        let current = self
+            .speaking_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        base + current
+    }
 }
 
 /// Builder for ParticipantState with sensible defaults.
@@ -88,6 +104,8 @@ impl ParticipantStateBuilder {
             anim: self.anim,
             leaving: self.leaving,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         }
     }
 }

@@ -91,6 +91,9 @@ pub struct App {
     pub ellipsis_tex: Option<(glow::NativeTexture, u32, u32)>,
     // Speaking ring pulse phase (0.0–1.0, advances while anyone is fully speaking)
     pub speaking_pulse_phase: f32,
+    // Per-participant accumulated talk time display
+    pub talk_time_textures: HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
+    pub last_talk_time_secs: HashMap<crate::discord::UserId, u64>,
     // Button press held state for visual feedback
     pub mute_held: bool,
     pub deaf_held: bool,
@@ -106,6 +109,7 @@ struct ParticipantRowParams {
     is_self: bool,
     user_id: crate::discord::UserId,
     display_name: String,
+    talk_secs: u64,
 }
 
 /// Parameters for rendering a status icon (mute/deafen).
@@ -366,6 +370,8 @@ impl App {
                 }
                 delete_all_textures_in_map(&*self.egl, &mut self.name_textures);
                 delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
+                delete_all_textures_in_map(&*self.egl, &mut self.talk_time_textures);
+                self.last_talk_time_secs.clear();
                 self.participants = parts
                     .iter()
                     .map(|p| ParticipantStateBuilder::from_discord(p).build())
@@ -453,13 +459,22 @@ impl App {
             discord::DiscordEvent::SpeakingUpdate { user_id, speaking } => {
                 if let Some(p) = self.find_participant_mut(&user_id) {
                     trace!(name = %p.display_name, speaking, "speaking update");
-                    p.speaking_until = if speaking {
+                    let now = std::time::Instant::now();
+                    if speaking {
                         // Ring stays for 1.5s after last SPEAKING_START.
                         // Discord fires SPEAKING_START ~every 1s while active,
                         // so the ring clears ~0.5s after the user goes quiet.
-                        Some(std::time::Instant::now() + std::time::Duration::from_millis(1500))
+                        p.speaking_until = Some(now + std::time::Duration::from_millis(1500));
+                        // Record segment start only on the first SPEAKING_START
+                        if p.speaking_started_at.is_none() {
+                            p.speaking_started_at = Some(now);
+                        }
                     } else {
-                        None
+                        p.speaking_until = None;
+                        // Finalize talk time segment
+                        if let Some(started) = p.speaking_started_at.take() {
+                            p.talk_time += started.elapsed();
+                        }
                     };
                     return true;
                 }
@@ -510,6 +525,8 @@ impl App {
                 delete_all_avatar_textures(&*self.egl, &mut self.avatar_textures);
                 delete_all_textures_in_map(&*self.egl, &mut self.name_textures);
                 delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
+                delete_all_textures_in_map(&*self.egl, &mut self.talk_time_textures);
+                self.last_talk_time_secs.clear();
                 self.participants.clear();
                 self.discord_mute = false;
                 self.discord_deaf = false;
@@ -892,16 +909,26 @@ impl App {
         let icons_w = icon_sz * 2.0 + icon_gap + 8.0;
         let name_x = av_x + av_size + 8.0;
         let name_w_max = sw - name_x - icons_w;
+        let show_talk_time = params.talk_secs > 0;
         if let Some(&(tex, tw, th)) = self.name_textures.get(&params.user_id) {
             let draw_h = th as f32;
-            let name_y = params.row_y_f + (row_h as f32 - draw_h) * 0.5;
+            // When talk time is shown, stack name above center; otherwise center it
+            let name_y = if show_talk_time {
+                params.row_y_f + (row_h as f32 * 0.5 - draw_h - 1.0)
+            } else {
+                params.row_y_f + (row_h as f32 - draw_h) * 0.5
+            };
             if tw as f32 > name_w_max {
                 self.egl
                     .draw_icon(name_x, name_y, name_w_max, draw_h, sw, sh, tex, name_op);
                 self.ensure_ellipsis_tex();
                 if let Some((etex, etw, eth)) = self.ellipsis_tex {
                     let ex = name_x + name_w_max - etw as f32;
-                    let ey = params.row_y_f + (row_h as f32 - eth as f32) * 0.5;
+                    let ey = if show_talk_time {
+                        params.row_y_f + (row_h as f32 * 0.5 - eth as f32 - 1.0)
+                    } else {
+                        params.row_y_f + (row_h as f32 - eth as f32) * 0.5
+                    };
                     self.egl.draw_icon(
                         ex,
                         ey,
@@ -916,6 +943,23 @@ impl App {
             } else {
                 self.egl
                     .draw_icon(name_x, name_y, tw as f32, draw_h, sw, sh, tex, name_op);
+            }
+        }
+
+        // Talk time label below name (only when the participant has spoken)
+        if show_talk_time {
+            if let Some(&(tt_tex, tt_w, tt_h)) = self.talk_time_textures.get(&params.user_id) {
+                let tt_y = params.row_y_f + row_h as f32 * 0.5 + 1.0;
+                self.egl.draw_icon(
+                    name_x,
+                    tt_y,
+                    tt_w as f32,
+                    tt_h as f32,
+                    sw,
+                    sh,
+                    tt_tex,
+                    row_anim_op * 0.65,
+                );
             }
         }
 
@@ -1126,6 +1170,7 @@ impl App {
             bool,
             crate::discord::UserId,
             String,
+            u64,
         );
         let self_id = self.self_user_id.clone();
         let visible: Vec<VisibleRow> = self
@@ -1144,13 +1189,24 @@ impl App {
                     p.user_id == self_id,
                     p.user_id.clone(),
                     p.display_name.clone(),
+                    p.current_talk_secs(),
                 )
             })
             .collect();
 
         for (
             slot,
-            (abs_idx, anim, muted, deafened, speaking_anim, is_self, user_id, display_name),
+            (
+                abs_idx,
+                anim,
+                muted,
+                deafened,
+                speaking_anim,
+                is_self,
+                user_id,
+                display_name,
+                talk_secs,
+            ),
         ) in visible.iter().enumerate()
         {
             let _ = abs_idx; // abs_idx available for future use; slot drives layout
@@ -1171,6 +1227,7 @@ impl App {
                 is_self: *is_self,
                 user_id: user_id.clone(),
                 display_name: display_name.clone(),
+                talk_secs: *talk_secs,
             };
             self.draw_participant_row(&params, op, sw, sh, row_h);
         }
@@ -1242,6 +1299,10 @@ impl App {
                 if let Some(tex) = self.avatar_textures.remove(uid) {
                     self.egl.delete_texture(tex);
                 }
+                if let Some((tex, _, _)) = self.talk_time_textures.remove(uid) {
+                    self.egl.delete_texture(tex);
+                }
+                self.last_talk_time_secs.remove(uid);
             }
         }
 
@@ -1272,6 +1333,10 @@ impl App {
             for p in &mut self.participants {
                 if p.speaking_until.map(|t| t <= now).unwrap_or(false) {
                     p.speaking_until = None;
+                    // Finalize any in-progress talk segment when the ring expires
+                    if let Some(started) = p.speaking_started_at.take() {
+                        p.talk_time += started.elapsed();
+                    }
                 }
             }
         }
@@ -1346,6 +1411,55 @@ impl App {
         }
         self.timer_tex = self.render_text_tex(&label, self.config.font_size * 0.86);
         true
+    }
+
+    /// Update per-participant talk time textures when their displayed second changes.
+    /// Returns true if any texture was updated (redraw needed).
+    pub fn tick_talk_time_textures(&mut self) -> bool {
+        let user_secs: Vec<(crate::discord::UserId, u64)> = self
+            .participants
+            .iter()
+            .map(|p| (p.user_id.clone(), p.current_talk_secs()))
+            .collect();
+
+        let mut changed = false;
+        for (uid, secs) in user_secs {
+            if secs == 0 {
+                // Remove stale texture if the participant hasn't spoken yet
+                if let Some((tex, _, _)) = self.talk_time_textures.remove(&uid) {
+                    self.egl.delete_texture(tex);
+                    self.last_talk_time_secs.remove(&uid);
+                    changed = true;
+                }
+                continue;
+            }
+            let last = self
+                .last_talk_time_secs
+                .get(&uid)
+                .copied()
+                .unwrap_or(u64::MAX);
+            if secs == last {
+                continue;
+            }
+            // Regenerate texture for this participant
+            if let Some((old_tex, _, _)) = self.talk_time_textures.remove(&uid) {
+                self.egl.delete_texture(old_tex);
+            }
+            let h = secs / 3600;
+            let m = (secs % 3600) / 60;
+            let s = secs % 60;
+            let label = if h > 0 {
+                format!("{h}:{m:02}:{s:02}")
+            } else {
+                format!("{m}:{s:02}")
+            };
+            if let Some(tex_data) = self.render_text_tex(&label, self.config.font_size * 0.78) {
+                self.talk_time_textures.insert(uid.clone(), tex_data);
+                self.last_talk_time_secs.insert(uid, secs);
+                changed = true;
+            }
+        }
+        changed
     }
 }
 
@@ -1644,6 +1758,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         // Should not panic
         draw_compact_core(
@@ -1680,6 +1796,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.5, // < 0.95 → pulse factor = 1.0 (else branch)
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1714,6 +1832,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1750,6 +1870,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         let p_deafened = ParticipantState {
             user_id: UserId("u_deaf".to_string()),
@@ -1760,6 +1882,8 @@ mod tests_state_helpers {
             anim: 0.7,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1798,6 +1922,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 1.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1836,6 +1962,8 @@ mod tests_state_helpers {
             anim: 1.0,
             leaving: false,
             speaking_anim: 1.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         // Should not panic and should exercise speaking + initials path
         draw_compact_core(
@@ -1869,6 +1997,8 @@ mod tests_discord_events {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         assert!(_p.user_id == "test");
         assert_eq!(_p.display_name, "Test User");
@@ -1888,6 +2018,8 @@ mod tests_discord_events {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         let now = std::time::Instant::now();
         p.speaking_until = Some(now);
@@ -1905,6 +2037,8 @@ mod tests_discord_events {
             anim: 1.0,
             leaving: false,
             speaking_anim: 0.0,
+            talk_time: std::time::Duration::ZERO,
+            speaking_started_at: None,
         };
         p.leaving = true;
         assert!(p.leaving);
@@ -1958,6 +2092,85 @@ mod tests_discord_events {
         assert!(p.muted);
         assert!(p.deafened);
         assert_eq!(p.anim, 1.0);
+    }
+
+    #[test]
+    fn talk_time_initial_zero() {
+        let p = ParticipantStateBuilder::new("u1", "Alice").build();
+        assert_eq!(p.talk_time, std::time::Duration::ZERO);
+        assert!(p.speaking_started_at.is_none());
+        assert_eq!(p.current_talk_secs(), 0);
+    }
+
+    #[test]
+    fn talk_time_accumulates_on_speaking_stop() {
+        let mut p = ParticipantStateBuilder::new("u1", "Alice").build();
+        let started = std::time::Instant::now() - std::time::Duration::from_secs(5);
+        p.speaking_started_at = Some(started);
+        // Simulate SPEAKING_STOP: finalize the segment
+        if let Some(t) = p.speaking_started_at.take() {
+            p.talk_time += t.elapsed();
+        }
+        assert!(p.talk_time.as_secs() >= 5);
+        assert!(p.speaking_started_at.is_none());
+    }
+
+    #[test]
+    fn talk_time_current_secs_includes_active_segment() {
+        let mut p = ParticipantStateBuilder::new("u1", "Alice").build();
+        p.talk_time = std::time::Duration::from_secs(10);
+        p.speaking_started_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        let secs = p.current_talk_secs();
+        assert!(secs >= 13, "expected >=13, got {secs}");
+    }
+
+    #[test]
+    fn talk_time_not_started_returns_base() {
+        let mut p = ParticipantStateBuilder::new("u1", "Alice").build();
+        p.talk_time = std::time::Duration::from_secs(42);
+        assert_eq!(p.current_talk_secs(), 42);
+    }
+
+    #[test]
+    fn tick_speaking_expiry_finalizes_talk_time() {
+        use std::time::{Duration, Instant};
+        let mut p = ParticipantStateBuilder::new("u1", "Alice").build();
+        let started = Instant::now() - Duration::from_secs(4);
+        p.speaking_started_at = Some(started);
+        p.speaking_until = Some(Instant::now() - Duration::from_millis(1)); // already expired
+
+        // Simulate tick_speaking_expiry logic directly
+        if p.speaking_until
+            .map(|t| t <= Instant::now())
+            .unwrap_or(false)
+        {
+            p.speaking_until = None;
+            if let Some(s) = p.speaking_started_at.take() {
+                p.talk_time += s.elapsed();
+            }
+        }
+
+        assert!(p.speaking_until.is_none());
+        assert!(p.speaking_started_at.is_none());
+        assert!(p.talk_time.as_secs() >= 4);
+    }
+
+    #[test]
+    fn talk_time_multiple_segments_accumulate() {
+        let mut p = ParticipantStateBuilder::new("u1", "Alice").build();
+        // First segment: 3 seconds
+        let s1 = std::time::Instant::now() - std::time::Duration::from_secs(3);
+        p.speaking_started_at = Some(s1);
+        if let Some(t) = p.speaking_started_at.take() {
+            p.talk_time += t.elapsed();
+        }
+        // Second segment: 5 seconds
+        let s2 = std::time::Instant::now() - std::time::Duration::from_secs(5);
+        p.speaking_started_at = Some(s2);
+        if let Some(t) = p.speaking_started_at.take() {
+            p.talk_time += t.elapsed();
+        }
+        assert!(p.talk_time.as_secs() >= 8);
     }
 
     #[test]

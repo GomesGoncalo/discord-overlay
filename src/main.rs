@@ -118,6 +118,7 @@ fn main() {
                 needs_redraw |= app.tick_ptt(now);
                 needs_redraw |= app.tick_idle_alpha();
                 needs_redraw |= app.tick_timer();
+                needs_redraw |= app.tick_talk_time_textures();
 
                 if needs_redraw {
                     trace!("timer tick: redrawing");
@@ -221,6 +222,8 @@ fn main() {
         speaking_pulse_phase: 0.0,
         mute_held: false,
         deaf_held: false,
+        talk_time_textures: std::collections::HashMap::new(),
+        last_talk_time_secs: std::collections::HashMap::new(),
         config: cfg,
     };
 
