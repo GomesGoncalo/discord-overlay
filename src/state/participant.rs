@@ -18,6 +18,8 @@ pub struct ParticipantState {
     pub talk_time: std::time::Duration,
     /// Instant when the current speaking segment started (None if not speaking).
     pub speaking_started_at: Option<std::time::Instant>,
+    /// Instant when this participant last stopped speaking (used for idle label).
+    pub last_spoke_at: Option<std::time::Instant>,
 }
 
 impl ParticipantState {
@@ -106,6 +108,7 @@ impl ParticipantStateBuilder {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         }
     }
 }
