@@ -90,6 +90,21 @@ mod tests {
         assert!(p.measure().is_none());
     }
 
+    /// Verify that a successful connection returns Some(ms).
+    #[test]
+    fn tcp_ping_successful_connection_returns_some() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept in background so the connect handshake completes
+        std::thread::spawn(move || {
+            let _ = listener.accept();
+        });
+        let probe = TcpPing::new(format!("127.0.0.1:{port}"));
+        let result = probe.measure();
+        assert!(result.is_some(), "expected Some(ms) for localhost connect");
+    }
+
     // ── Trait-object tests ───────────────────────────────────────────────────
 
     struct MockProbe {

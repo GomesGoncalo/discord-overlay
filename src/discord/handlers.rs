@@ -615,4 +615,79 @@ mod tests {
         let handlers = get_event_handlers();
         assert_eq!(handlers.len(), 8);
     }
+
+    #[test]
+    fn voice_channel_select_handler_with_avatar_populates_avatars() {
+        let data = json!({
+            "id": "chan1",
+            "name": "General",
+            "guild_id": "g1",
+            "voice_states": []
+        });
+        let v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc", "data": data});
+        let h = VoiceChannelSelectHandler;
+        let avatar = "avhash1".to_string();
+        // Local user has an avatar hash → should appear in avatars vec
+        let res = h.handle(&v, "u1", "alice", Some(&avatar));
+        let (_, avatars, _, _) = res.unwrap();
+        assert_eq!(avatars.len(), 1);
+        assert_eq!(avatars[0].0, "u1");
+        assert_eq!(avatars[0].1, "avhash1");
+    }
+
+    #[test]
+    fn extract_self_data_local_user_found_uses_their_state() {
+        let participants = vec![
+            ParticipantBuilder::new("u1", "alice")
+                .nick(Some("Alice".to_string()))
+                .muted(true)
+                .deafened(false)
+                .build(),
+            ParticipantBuilder::new("u2", "bob").build(),
+        ];
+        let (self_data, others) = extract_self_data(&participants, "u1", None);
+        assert_eq!(self_data.nick.as_deref(), Some("Alice"));
+        assert!(self_data.muted);
+        assert!(!self_data.deafened);
+        assert_eq!(others.len(), 1);
+        assert_eq!(others[0].user_id, "u2");
+    }
+
+    #[test]
+    fn extract_self_data_local_avatar_preferred_over_participant_hash() {
+        let participants = vec![ParticipantBuilder::new("u1", "alice")
+            .avatar_hash(Some("participant_hash".to_string()))
+            .build()];
+        let local_avatar = "local_hash".to_string();
+        let (self_data, _) = extract_self_data(&participants, "u1", Some(&local_avatar));
+        // local_avatar takes priority over participant's own hash
+        assert_eq!(self_data.avatar_hash.as_deref(), Some("local_hash"));
+    }
+
+    #[test]
+    fn voice_channel_select_handler_local_user_nick_used_in_participants() {
+        let data = json!({
+            "id": "chan1",
+            "name": "General",
+            "guild_id": "g1",
+            "voice_states": [
+                {
+                    "user": {"id": "u1", "username": "alice"},
+                    "nick": "AliceNick",
+                    "voice_state": {}
+                }
+            ]
+        });
+        let v = json!({"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": "gvsc", "data": data});
+        let h = VoiceChannelSelectHandler;
+        let res = h.handle(&v, "u1", "alice", None).unwrap();
+        let (events, _, _, _) = res;
+        match &events[0] {
+            DiscordEvent::VoiceParticipants { participants, .. } => {
+                assert!(!participants.is_empty());
+                assert_eq!(participants[0].username, "alice");
+            }
+            _ => panic!("expected VoiceParticipants"),
+        }
+    }
 }
