@@ -101,6 +101,9 @@ pub struct App {
     // Jitter (ping standard deviation) display
     pub ping_samples: std::collections::VecDeque<u32>,
     pub jitter_tex: Option<(glow::NativeTexture, u32, u32)>,
+    // Clock display (HH:MM, updates once per minute)
+    pub clock_tex: Option<(glow::NativeTexture, u32, u32)>,
+    pub last_clock_minute: u32,
     // Button press held state for visual feedback
     pub mute_held: bool,
     pub deaf_held: bool,
@@ -663,8 +666,15 @@ impl App {
         }
         let _ = timer_next_x; // keeps the layout consistent if more header items are added
 
-        // Participant count — right-aligned but kept clear of the mute/deafen buttons
+        // Clock — right-aligned in the bottom row, left of the participant count
         let (bx2, _, _, _) = button2_rects(self.width, 64);
+        if let Some((tex, tw, th)) = self.clock_tex {
+            let cx = (bx2 as f32 - tw as f32 - 8.0).max(timer_next_x);
+            self.egl
+                .draw_icon(cx, 40.0, tw as f32, th as f32, sw, sh, tex, op * 0.55);
+        }
+
+        // Participant count — right-aligned but kept clear of the mute/deafen buttons
         if let Some((tex, tw, th)) = self.participant_count_tex {
             let px = participant_count_x(bx2, tw, text_x);
             self.egl
@@ -1510,6 +1520,22 @@ impl App {
         true
     }
 
+    /// Regenerate the clock texture when the displayed minute changes.
+    /// Returns true if the texture was updated (redraw needed).
+    pub fn tick_clock(&mut self) -> bool {
+        use chrono::Timelike;
+        let now = chrono::Local::now();
+        let minute = now.hour() * 60 + now.minute();
+        if minute == self.last_clock_minute {
+            return false;
+        }
+        self.last_clock_minute = minute;
+        delete_texture_if_present(&*self.egl, &mut self.clock_tex);
+        let label = clock_label(now.hour(), now.minute());
+        self.clock_tex = self.render_text_tex(&label, self.config.font_size * 0.86);
+        true
+    }
+
     /// Update per-participant talk time / idle time textures.
     ///
     /// When a participant has been silent for ≥ 60 s an idle label ("Xm ago" / "Xh ago")
@@ -1861,6 +1887,11 @@ fn ping_label(latency_ms: u32) -> String {
 /// Format a jitter (stddev) value as the label shown next to ping in the header.
 fn jitter_label(stddev_ms: u32) -> String {
     format!("±{stddev_ms}ms")
+}
+
+/// Format the current local time as "HH:MM" for display in the header.
+fn clock_label(hour: u32, minute: u32) -> String {
+    format!("{hour:02}:{minute:02}")
 }
 
 /// Talk fraction of a single participant relative to the total.
@@ -2229,6 +2260,28 @@ mod tests_state_helpers {
     #[test]
     fn ping_label_format_large() {
         assert_eq!(ping_label(999), "~999ms");
+    }
+
+    // ── Clock label format ───────────────────────────────────────────────────
+
+    #[test]
+    fn clock_label_format_midnight() {
+        assert_eq!(clock_label(0, 0), "00:00");
+    }
+
+    #[test]
+    fn clock_label_format_noon() {
+        assert_eq!(clock_label(12, 30), "12:30");
+    }
+
+    #[test]
+    fn clock_label_format_evening() {
+        assert_eq!(clock_label(23, 59), "23:59");
+    }
+
+    #[test]
+    fn clock_label_pads_single_digits() {
+        assert_eq!(clock_label(9, 5), "09:05");
     }
 
     // ── Jitter label format ──────────────────────────────────────────────────
