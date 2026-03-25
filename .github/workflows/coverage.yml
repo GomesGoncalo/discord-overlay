@@ -47,7 +47,7 @@ jobs:
 
       - name: Run tarpaulin (generate lcov + json)
         run: |
-          cargo tarpaulin --out Lcov --out Json --verbose
+          RUST_TEST_THREADS=1 cargo tarpaulin --engine Llvm --out Lcov --out Json --verbose
 
       - name: Check coverage baseline
         run: bash scripts/check-coverage.sh
