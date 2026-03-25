@@ -94,6 +94,9 @@ pub struct App {
     // Per-participant accumulated talk time display
     pub talk_time_textures: HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
     pub last_talk_time_secs: HashMap<crate::discord::UserId, u64>,
+    // Network latency probe result
+    pub ping_ms: Option<u32>,
+    pub ping_tex: Option<(glow::NativeTexture, u32, u32)>,
     // Button press held state for visual feedback
     pub mute_held: bool,
     pub deaf_held: bool,
@@ -501,6 +504,13 @@ impl App {
                 }
                 true
             }
+            discord::DiscordEvent::PingResult { latency_ms } => {
+                self.ping_ms = Some(latency_ms);
+                delete_texture_if_present(&*self.egl, &mut self.ping_tex);
+                let label = format!("~{latency_ms}ms");
+                self.ping_tex = self.render_text_tex(&label, self.config.font_size * 0.86);
+                true
+            }
             discord::DiscordEvent::Disconnected => {
                 info!("Discord disconnected, clearing voice state");
                 // Clear all voice-channel state so the UI resets to idle.
@@ -518,6 +528,8 @@ impl App {
                 // Clear session timer
                 self.channel_joined_at = None;
                 delete_texture_if_present(&*self.egl, &mut self.timer_tex);
+                // Clear ping texture (keep ping_ms as last-known value)
+                delete_texture_if_present(&*self.egl, &mut self.ping_tex);
                 // Clear scroll indicator
                 delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.scroll_offset = 0;
@@ -587,23 +599,39 @@ impl App {
             self.egl
                 .draw_icon(text_x, 22.0, tw as f32, th as f32, sw, sh, tex, op * 0.90);
         }
+        let mut timer_next_x = text_x;
         if let Some((tex, tw, th)) = self.timer_tex {
-            self.egl
-                .draw_icon(text_x, 40.0, tw as f32, th as f32, sw, sh, tex, op * 0.55);
-        }
-
-        // Participant count — top-right corner of header
-        if let Some((tex, tw, th)) = self.participant_count_tex {
             self.egl.draw_icon(
-                sw - tw as f32 - 8.0,
-                6.0,
+                timer_next_x,
+                40.0,
                 tw as f32,
                 th as f32,
                 sw,
                 sh,
                 tex,
-                op * 0.50,
+                op * 0.55,
             );
+            timer_next_x += tw as f32 + 8.0;
+        }
+        if let Some((tex, tw, th)) = self.ping_tex {
+            self.egl.draw_icon(
+                timer_next_x,
+                40.0,
+                tw as f32,
+                th as f32,
+                sw,
+                sh,
+                tex,
+                op * 0.55,
+            );
+        }
+
+        // Participant count — right-aligned but kept clear of the mute/deafen buttons
+        let (bx2, _, _, _) = button2_rects(self.width, 64);
+        if let Some((tex, tw, th)) = self.participant_count_tex {
+            let px = (bx2 as f32 - tw as f32 - 8.0).max(text_x);
+            self.egl
+                .draw_icon(px, 6.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
         }
 
         // PTT indicator dot — bottom-right of header
@@ -1696,6 +1724,19 @@ pub(crate) fn placeholder_color_index(user_id: &str) -> usize {
     (hue % 4) as usize
 }
 
+/// Mirrors the participant-count x-position formula used in draw_header.
+/// Returns the x coordinate where the count texture will be drawn.
+#[cfg(test)]
+pub(crate) fn participant_count_x(bx2: i32, text_width: u32, text_x: f32) -> f32 {
+    (bx2 as f32 - text_width as f32 - 8.0).max(text_x)
+}
+
+/// Returns the ping label string for a given latency value.
+#[cfg(test)]
+pub(crate) fn ping_label(latency_ms: u32) -> String {
+    format!("~{latency_ms}ms")
+}
+
 #[cfg(test)]
 mod tests_state_helpers {
     use super::*;
@@ -1979,6 +2020,54 @@ mod tests_state_helpers {
             None,
             0.0,
         );
+    }
+
+    // ── Participant count x-position ─────────────────────────────────────────
+
+    #[test]
+    fn participant_count_x_stays_left_of_mute_button() {
+        // bx2 = mute button left edge; count must never overlap it
+        let (bx2, _, _, _) = button2_rects(360, 64);
+        let text_x = 40.0_f32;
+        // Wide text (e.g. "12 in channel" ~90px)
+        let x = participant_count_x(bx2, 90, text_x);
+        assert!(x + 90.0 + 8.0 <= bx2 as f32, "count overlaps mute button");
+    }
+
+    #[test]
+    fn participant_count_x_clamped_to_text_x_when_very_wide() {
+        // If text is wider than available space, clamp to text_x (drag-handle boundary)
+        let text_x = 40.0_f32;
+        // bx2 very small (tiny window), text wider than available gap
+        let x = participant_count_x(50, 200, text_x);
+        assert_eq!(x, text_x);
+    }
+
+    #[test]
+    fn participant_count_x_normal_short_text() {
+        let (bx2, _, _, _) = button2_rects(360, 64);
+        let text_x = 40.0_f32;
+        let tw = 50u32;
+        let x = participant_count_x(bx2, tw, text_x);
+        let expected = bx2 as f32 - tw as f32 - 8.0;
+        assert!((x - expected).abs() < 0.01);
+    }
+
+    // ── Ping label format ────────────────────────────────────────────────────
+
+    #[test]
+    fn ping_label_format_typical() {
+        assert_eq!(ping_label(42), "~42ms");
+    }
+
+    #[test]
+    fn ping_label_format_zero() {
+        assert_eq!(ping_label(0), "~0ms");
+    }
+
+    #[test]
+    fn ping_label_format_large() {
+        assert_eq!(ping_label(999), "~999ms");
     }
 }
 

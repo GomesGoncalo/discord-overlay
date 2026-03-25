@@ -114,6 +114,8 @@ pub enum DiscordEvent {
     GuildName { name: String },
     /// Connection lost.
     Disconnected,
+    /// Network latency measurement result from the background probe.
+    PingResult { latency_ms: u32 },
 }
 
 /// Commands sent from the main thread to the Discord thread.
@@ -306,5 +308,59 @@ mod tests {
             .avatar_hash(Some(String::new()))
             .build();
         assert!(p.avatar_hash.is_none());
+    }
+
+    #[test]
+    fn ping_result_variant_constructible() {
+        let ev = DiscordEvent::PingResult { latency_ms: 42 };
+        match ev {
+            DiscordEvent::PingResult { latency_ms } => assert_eq!(latency_ms, 42),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ping_result_zero_ms() {
+        let ev = DiscordEvent::PingResult { latency_ms: 0 };
+        match ev {
+            DiscordEvent::PingResult { latency_ms } => assert_eq!(latency_ms, 0),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn userid_is_empty_true() {
+        let id = UserId(String::new());
+        assert!(id.is_empty());
+    }
+
+    #[test]
+    fn userid_is_empty_false() {
+        let id = UserId("abc".to_string());
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn get_string_missing_key_returns_empty() {
+        let v = json!({"a": "hello"});
+        assert_eq!(v.get_string("missing"), "");
+    }
+
+    #[test]
+    fn get_str_option_present() {
+        let v = json!({"key": "value"});
+        assert_eq!(v.get_str_option("key"), Some("value".to_string()));
+    }
+
+    #[test]
+    fn get_str_option_missing_returns_none() {
+        let v = json!({"key": "value"});
+        assert!(v.get_str_option("other").is_none());
+    }
+
+    #[test]
+    fn get_str_option_empty_string_returns_none() {
+        let v = json!({"key": ""});
+        assert!(v.get_str_option("key").is_none());
     }
 }
