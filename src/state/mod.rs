@@ -507,8 +507,8 @@ impl App {
             discord::DiscordEvent::PingResult { latency_ms } => {
                 self.ping_ms = Some(latency_ms);
                 delete_texture_if_present(&*self.egl, &mut self.ping_tex);
-                let label = format!("~{latency_ms}ms");
-                self.ping_tex = self.render_text_tex(&label, self.config.font_size * 0.86);
+                self.ping_tex =
+                    self.render_text_tex(&ping_label(latency_ms), self.config.font_size * 0.86);
                 true
             }
             discord::DiscordEvent::Disconnected => {
@@ -629,7 +629,7 @@ impl App {
         // Participant count — right-aligned but kept clear of the mute/deafen buttons
         let (bx2, _, _, _) = button2_rects(self.width, 64);
         if let Some((tex, tw, th)) = self.participant_count_tex {
-            let px = (bx2 as f32 - tw as f32 - 8.0).max(text_x);
+            let px = participant_count_x(bx2, tw, text_x);
             self.egl
                 .draw_icon(px, 6.0, tw as f32, th as f32, sw, sh, tex, op * 0.50);
         }
@@ -1724,16 +1724,14 @@ pub(crate) fn placeholder_color_index(user_id: &str) -> usize {
     (hue % 4) as usize
 }
 
-/// Mirrors the participant-count x-position formula used in draw_header.
-/// Returns the x coordinate where the count texture will be drawn.
-#[cfg(test)]
-pub(crate) fn participant_count_x(bx2: i32, text_width: u32, text_x: f32) -> f32 {
+/// X coordinate for the participant count texture in the header.
+/// Right-aligns relative to the mute button but clamps to text_x.
+fn participant_count_x(bx2: i32, text_width: u32, text_x: f32) -> f32 {
     (bx2 as f32 - text_width as f32 - 8.0).max(text_x)
 }
 
-/// Returns the ping label string for a given latency value.
-#[cfg(test)]
-pub(crate) fn ping_label(latency_ms: u32) -> String {
+/// Format a latency value as the ping label shown in the header.
+fn ping_label(latency_ms: u32) -> String {
     format!("~{latency_ms}ms")
 }
 
