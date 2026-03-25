@@ -119,6 +119,7 @@ fn main() {
                 needs_redraw |= app.tick_ptt(now);
                 needs_redraw |= app.tick_idle_alpha();
                 needs_redraw |= app.tick_timer();
+                needs_redraw |= app.tick_clock();
                 needs_redraw |= app.tick_talk_time_textures();
 
                 if needs_redraw {
@@ -245,6 +246,8 @@ fn main() {
         ping_tex: None,
         ping_samples: std::collections::VecDeque::new(),
         jitter_tex: None,
+        clock_tex: None,
+        last_clock_minute: u32::MAX,
         config: cfg,
     };
 
