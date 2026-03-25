@@ -240,8 +240,11 @@ fn main() {
         deaf_held: false,
         talk_time_textures: std::collections::HashMap::new(),
         last_talk_time_secs: std::collections::HashMap::new(),
+        last_idle_label: std::collections::HashMap::new(),
         ping_ms: None,
         ping_tex: None,
+        ping_samples: std::collections::VecDeque::new(),
+        jitter_tex: None,
         config: cfg,
     };
 

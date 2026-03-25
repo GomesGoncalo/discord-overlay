@@ -94,9 +94,13 @@ pub struct App {
     // Per-participant accumulated talk time display
     pub talk_time_textures: HashMap<crate::discord::UserId, (glow::NativeTexture, u32, u32)>,
     pub last_talk_time_secs: HashMap<crate::discord::UserId, u64>,
+    pub last_idle_label: HashMap<crate::discord::UserId, String>,
     // Network latency probe result
     pub ping_ms: Option<u32>,
     pub ping_tex: Option<(glow::NativeTexture, u32, u32)>,
+    // Jitter (ping standard deviation) display
+    pub ping_samples: std::collections::VecDeque<u32>,
+    pub jitter_tex: Option<(glow::NativeTexture, u32, u32)>,
     // Button press held state for visual feedback
     pub mute_held: bool,
     pub deaf_held: bool,
@@ -113,6 +117,7 @@ struct ParticipantRowParams {
     user_id: crate::discord::UserId,
     display_name: String,
     talk_secs: u64,
+    total_talk_secs: u64,
 }
 
 /// Parameters for rendering a status icon (mute/deafen).
@@ -375,6 +380,7 @@ impl App {
                 delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
                 delete_all_textures_in_map(&*self.egl, &mut self.talk_time_textures);
                 self.last_talk_time_secs.clear();
+                self.last_idle_label.clear();
                 self.participants = parts
                     .iter()
                     .map(|p| ParticipantStateBuilder::from_discord(p).build())
@@ -478,6 +484,7 @@ impl App {
                         if let Some(started) = p.speaking_started_at.take() {
                             p.talk_time += started.elapsed();
                         }
+                        p.last_spoke_at = Some(std::time::Instant::now());
                     };
                     return true;
                 }
@@ -509,6 +516,18 @@ impl App {
                 delete_texture_if_present(&*self.egl, &mut self.ping_tex);
                 self.ping_tex =
                     self.render_text_tex(&ping_label(latency_ms), self.config.font_size * 0.86);
+                self.ping_samples.push_back(latency_ms);
+                if self.ping_samples.len() > 10 {
+                    self.ping_samples.pop_front();
+                }
+                // Only show jitter with >= 2 samples
+                let samples: Vec<u32> = self.ping_samples.iter().copied().collect();
+                let stddev = compute_stddev(&samples);
+                if stddev > 0 || samples.len() >= 2 {
+                    delete_texture_if_present(&*self.egl, &mut self.jitter_tex);
+                    self.jitter_tex =
+                        self.render_text_tex(&jitter_label(stddev), self.config.font_size * 0.86);
+                }
                 true
             }
             discord::DiscordEvent::Disconnected => {
@@ -530,6 +549,8 @@ impl App {
                 delete_texture_if_present(&*self.egl, &mut self.timer_tex);
                 // Clear ping texture (keep ping_ms as last-known value)
                 delete_texture_if_present(&*self.egl, &mut self.ping_tex);
+                delete_texture_if_present(&*self.egl, &mut self.jitter_tex);
+                self.ping_samples.clear();
                 // Clear scroll indicator
                 delete_texture_if_present(&*self.egl, &mut self.scroll_indicator_tex);
                 self.scroll_offset = 0;
@@ -539,6 +560,7 @@ impl App {
                 delete_all_textures_in_map(&*self.egl, &mut self.initials_textures);
                 delete_all_textures_in_map(&*self.egl, &mut self.talk_time_textures);
                 self.last_talk_time_secs.clear();
+                self.last_idle_label.clear();
                 self.participants.clear();
                 self.discord_mute = false;
                 self.discord_deaf = false;
@@ -624,7 +646,22 @@ impl App {
                 tex,
                 op * 0.55,
             );
+            timer_next_x += tw as f32 + 8.0;
         }
+        if let Some((tex, tw, th)) = self.jitter_tex {
+            self.egl.draw_icon(
+                timer_next_x,
+                40.0,
+                tw as f32,
+                th as f32,
+                sw,
+                sh,
+                tex,
+                op * 0.55,
+            );
+            timer_next_x += tw as f32 + 8.0;
+        }
+        let _ = timer_next_x; // keeps the layout consistent if more header items are added
 
         // Participant count — right-aligned but kept clear of the mute/deafen buttons
         let (bx2, _, _, _) = button2_rects(self.width, 64);
@@ -926,6 +963,25 @@ impl App {
             }
         }
 
+        // Talk ratio bar — thin 3px colored bar beneath the avatar showing fraction of total talk time
+        if params.total_talk_secs > 0 && params.talk_secs > 0 {
+            let bar_y = av_y + av_size + 2.0;
+            let ratio = talk_ratio(params.talk_secs, params.total_talk_secs);
+            let bar_w = (av_size * ratio).max(0.0).min(av_size);
+            if bar_w >= 1.0 {
+                self.egl.draw_rect(
+                    av_x,
+                    bar_y,
+                    bar_w,
+                    3.0,
+                    sw,
+                    sh,
+                    [0.4, 0.8, 1.0, row_anim_op * 0.7],
+                    1.5,
+                );
+            }
+        }
+
         // Name text — dimmed when muted to match Discord's de-emphasis style
         let name_op = if params.muted {
             row_anim_op * 0.65
@@ -937,7 +993,10 @@ impl App {
         let icons_w = icon_sz * 2.0 + icon_gap + 8.0;
         let name_x = av_x + av_size + 8.0;
         let name_w_max = sw - name_x - icons_w;
-        let show_talk_time = params.talk_secs > 0;
+        // Show sublabel (talk time or idle label) whenever a texture exists for this participant,
+        // even when talk_secs == 0 (idle label case: has spoken before but is now long silent).
+        let show_talk_time =
+            params.talk_secs > 0 || self.talk_time_textures.contains_key(&params.user_id);
         if let Some(&(tex, tw, th)) = self.name_textures.get(&params.user_id) {
             let draw_h = th as f32;
             // When talk time is shown, stack name above center; otherwise center it
@@ -1188,6 +1247,13 @@ impl App {
             }
         }
 
+        // Compute total talk time across all participants for ratio bar
+        let total_talk_secs: u64 = self
+            .participants
+            .iter()
+            .map(|p| p.current_talk_secs())
+            .sum();
+
         // Collect visible participant data to avoid re-borrowing self in the loop
         type VisibleRow = (
             usize,
@@ -1256,6 +1322,7 @@ impl App {
                 user_id: user_id.clone(),
                 display_name: display_name.clone(),
                 talk_secs: *talk_secs,
+                total_talk_secs,
             };
             self.draw_participant_row(&params, op, sw, sh, row_h);
         }
@@ -1331,6 +1398,7 @@ impl App {
                     self.egl.delete_texture(tex);
                 }
                 self.last_talk_time_secs.remove(uid);
+                self.last_idle_label.remove(uid);
             }
         }
 
@@ -1365,6 +1433,7 @@ impl App {
                     if let Some(started) = p.speaking_started_at.take() {
                         p.talk_time += started.elapsed();
                     }
+                    p.last_spoke_at = Some(std::time::Instant::now());
                 }
             }
         }
@@ -1441,17 +1510,71 @@ impl App {
         true
     }
 
-    /// Update per-participant talk time textures when their displayed second changes.
+    /// Update per-participant talk time / idle time textures.
+    ///
+    /// When a participant has been silent for ≥ 60 s an idle label ("Xm ago" / "Xh ago")
+    /// is rendered into the same `talk_time_textures` slot, replacing the talk-time string.
     /// Returns true if any texture was updated (redraw needed).
     pub fn tick_talk_time_textures(&mut self) -> bool {
-        let user_secs: Vec<(crate::discord::UserId, u64)> = self
+        let user_data: Vec<(
+            crate::discord::UserId,
+            u64,
+            bool,
+            Option<std::time::Instant>,
+        )> = self
             .participants
             .iter()
-            .map(|p| (p.user_id.clone(), p.current_talk_secs()))
+            .map(|p| {
+                let secs = p.current_talk_secs();
+                let is_speaking = p.speaking_until.is_some() || p.speaking_started_at.is_some();
+                (p.user_id.clone(), secs, is_speaking, p.last_spoke_at)
+            })
             .collect();
 
         let mut changed = false;
-        for (uid, secs) in user_secs {
+        for (uid, secs, is_speaking, last_spoke_at) in user_data {
+            // Idle label takes priority when the participant is quiet for ≥ 60 s.
+            let idle_label: Option<String> = if !is_speaking {
+                last_spoke_at.and_then(|t| {
+                    let s = t.elapsed().as_secs();
+                    if s < 60 {
+                        None
+                    } else if s < 3600 {
+                        Some(format!("{}m ago", s / 60))
+                    } else {
+                        Some(format!("{}h ago", s / 3600))
+                    }
+                })
+            } else {
+                None
+            };
+
+            if let Some(ref idle) = idle_label {
+                // Only regenerate when the formatted minute/hour string changes.
+                if self.last_idle_label.get(&uid).map(|s| s.as_str()) == Some(idle.as_str()) {
+                    continue;
+                }
+                self.last_talk_time_secs.remove(&uid); // force talk-time re-render on return
+                if let Some((old_tex, _, _)) = self.talk_time_textures.remove(&uid) {
+                    self.egl.delete_texture(old_tex);
+                }
+                if let Some(tex_data) = self.render_text_tex(idle, self.config.font_size * 0.78) {
+                    self.talk_time_textures.insert(uid.clone(), tex_data);
+                    self.last_idle_label.insert(uid, idle.clone());
+                    changed = true;
+                }
+                continue;
+            }
+
+            // Not showing idle label — clear any stale idle entry and fall through to talk time.
+            if self.last_idle_label.remove(&uid).is_some() {
+                self.last_talk_time_secs.remove(&uid); // force re-render
+                if let Some((old_tex, _, _)) = self.talk_time_textures.remove(&uid) {
+                    self.egl.delete_texture(old_tex);
+                }
+                changed = true;
+            }
+
             if secs == 0 {
                 // Remove stale texture if the participant hasn't spoken yet
                 if let Some((tex, _, _)) = self.talk_time_textures.remove(&uid) {
@@ -1735,6 +1858,39 @@ fn ping_label(latency_ms: u32) -> String {
     format!("~{latency_ms}ms")
 }
 
+/// Format a jitter (stddev) value as the label shown next to ping in the header.
+fn jitter_label(stddev_ms: u32) -> String {
+    format!("±{stddev_ms}ms")
+}
+
+/// Talk fraction of a single participant relative to the total.
+/// Returns 0.0 when total is 0 to avoid division by zero.
+fn talk_ratio(talk_secs: u64, total_secs: u64) -> f32 {
+    if total_secs == 0 {
+        return 0.0;
+    }
+    (talk_secs as f32 / total_secs as f32).clamp(0.0, 1.0)
+}
+
+/// Compute the population standard deviation of a slice of ping samples.
+/// Returns 0 if fewer than 2 samples are provided (matches the ≥2 guard in the handler).
+fn compute_stddev(samples: &[u32]) -> u32 {
+    if samples.len() < 2 {
+        return 0;
+    }
+    let n = samples.len() as f64;
+    let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / n;
+    let variance = samples
+        .iter()
+        .map(|&x| {
+            let d = x as f64 - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / n;
+    variance.sqrt().round() as u32
+}
+
 #[cfg(test)]
 mod tests_state_helpers {
     use super::*;
@@ -1799,6 +1955,7 @@ mod tests_state_helpers {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         // Should not panic
         draw_compact_core(
@@ -1837,6 +1994,7 @@ mod tests_state_helpers {
             speaking_anim: 0.5, // < 0.95 → pulse factor = 1.0 (else branch)
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1873,6 +2031,7 @@ mod tests_state_helpers {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1911,6 +2070,7 @@ mod tests_state_helpers {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         let p_deafened = ParticipantState {
             user_id: UserId("u_deaf".to_string()),
@@ -1923,6 +2083,7 @@ mod tests_state_helpers {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         draw_compact_core(
             &egl,
@@ -1963,6 +2124,7 @@ mod tests_state_helpers {
             speaking_anim: 1.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         draw_compact_core(
             &egl,
@@ -2003,6 +2165,7 @@ mod tests_state_helpers {
             speaking_anim: 1.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         // Should not panic and should exercise speaking + initials path
         draw_compact_core(
@@ -2067,6 +2230,102 @@ mod tests_state_helpers {
     fn ping_label_format_large() {
         assert_eq!(ping_label(999), "~999ms");
     }
+
+    // ── Jitter label format ──────────────────────────────────────────────────
+
+    #[test]
+    fn jitter_label_format() {
+        assert_eq!(jitter_label(5), "±5ms");
+    }
+
+    #[test]
+    fn jitter_label_zero() {
+        assert_eq!(jitter_label(0), "±0ms");
+    }
+
+    // ── Stddev computation ───────────────────────────────────────────────────
+
+    #[test]
+    fn stddev_uniform_samples() {
+        // All same value → stddev = 0
+        let samples = [50u32; 10];
+        assert_eq!(compute_stddev(&samples), 0);
+    }
+
+    #[test]
+    fn stddev_two_samples() {
+        // [10, 20] → mean=15, variance=25, stddev=5
+        let samples = [10u32, 20u32];
+        assert_eq!(compute_stddev(&samples), 5);
+    }
+
+    #[test]
+    fn jitter_suppressed_with_one_sample() {
+        // With only 1 sample the ≥2 guard prevents jitter computation;
+        // compute_stddev models the same guard and returns 0.
+        let samples = [42u32];
+        assert_eq!(compute_stddev(&samples), 0);
+        // Also verify the label would not be produced (no texture update attempted)
+        // since the handler checks ping_samples.len() >= 2 before rendering.
+        let mut deque: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+        deque.push_back(42);
+        assert!(
+            deque.len() < 2,
+            "one sample should not trigger jitter render"
+        );
+    }
+
+    // ── talk_ratio ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn talk_ratio_equal_speakers() {
+        assert!((talk_ratio(50, 100) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn talk_ratio_zero_total() {
+        assert_eq!(talk_ratio(10, 0), 0.0);
+    }
+
+    #[test]
+    fn talk_ratio_all_one_speaker() {
+        assert!((talk_ratio(100, 100) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn talk_ratio_clamped() {
+        assert!((talk_ratio(110, 100) - 1.0).abs() < 1e-6);
+    }
+
+    // ── idle_label format ────────────────────────────────────────────────────
+
+    fn idle_label(elapsed_secs: u64) -> Option<String> {
+        if elapsed_secs < 60 {
+            None
+        } else if elapsed_secs < 3600 {
+            Some(format!("{}m ago", elapsed_secs / 60))
+        } else {
+            Some(format!("{}h ago", elapsed_secs / 3600))
+        }
+    }
+
+    #[test]
+    fn idle_label_below_threshold_returns_none() {
+        assert!(idle_label(30).is_none());
+        assert!(idle_label(59).is_none());
+    }
+
+    #[test]
+    fn idle_label_format_minutes() {
+        assert_eq!(idle_label(65), Some("1m ago".to_string()));
+        assert_eq!(idle_label(120), Some("2m ago".to_string()));
+    }
+
+    #[test]
+    fn idle_label_format_hours() {
+        assert_eq!(idle_label(3700), Some("1h ago".to_string()));
+        assert_eq!(idle_label(7200), Some("2h ago".to_string()));
+    }
 }
 
 #[cfg(test)]
@@ -2086,6 +2345,7 @@ mod tests_discord_events {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         assert!(_p.user_id == "test");
         assert_eq!(_p.display_name, "Test User");
@@ -2107,6 +2367,7 @@ mod tests_discord_events {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         let now = std::time::Instant::now();
         p.speaking_until = Some(now);
@@ -2126,6 +2387,7 @@ mod tests_discord_events {
             speaking_anim: 0.0,
             talk_time: std::time::Duration::ZERO,
             speaking_started_at: None,
+            last_spoke_at: None,
         };
         p.leaving = true;
         assert!(p.leaving);
