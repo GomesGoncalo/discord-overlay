@@ -8,6 +8,7 @@ mod avatar;
 mod config;
 mod discord;
 mod handlers;
+mod latency;
 mod render;
 mod render_error;
 mod state;
@@ -153,7 +154,7 @@ fn main() {
                 client_id: cfg.discord_client_id.clone(),
                 client_secret: cfg.discord_client_secret.clone(),
             },
-            discord_ev_tx,
+            discord_ev_tx.clone(),
             rx,
         );
         info!("Discord IPC enabled — waiting for connection...");
@@ -164,6 +165,21 @@ fn main() {
         );
         None
     };
+
+    // Background latency probe — measures TCP RTT to discord.com:443 every 10s
+    {
+        use latency::{LatencyProbe, TcpPing};
+        let ping_tx = discord_ev_tx.clone();
+        std::thread::spawn(move || {
+            let probe = TcpPing::new("discord.com:443");
+            loop {
+                if let Some(ms) = probe.measure() {
+                    let _ = ping_tx.send(discord::DiscordEvent::PingResult { latency_ms: ms });
+                }
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        });
+    }
 
     let mut app = App {
         registry_state: RegistryState::new(&globals),
@@ -224,6 +240,8 @@ fn main() {
         deaf_held: false,
         talk_time_textures: std::collections::HashMap::new(),
         last_talk_time_secs: std::collections::HashMap::new(),
+        ping_ms: None,
+        ping_tex: None,
         config: cfg,
     };
 
